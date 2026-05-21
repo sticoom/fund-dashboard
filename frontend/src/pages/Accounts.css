@@ -1,0 +1,243 @@
+.accounts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.accounts-header h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.accounts-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-tab {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-tab.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.search-input {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.accounts-table-wrap {
+  background: var(--card-bg);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.accounts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.accounts-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  background: var(--gray-light);
+}
+
+.accounts-table th:nth-child(n+4) {
+  text-align: right;
+}
+
+.accounts-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.accounts-table td:nth-child(n+4) {
+  text-align: right;
+}
+
+.account-row:hover {
+  background: var(--gray-light);
+}
+
+.account-name {
+  font-weight: 500;
+}
+
+.expand-icon {
+  margin-right: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--gray-light);
+  color: var(--text-secondary);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.income {
+  color: var(--green);
+}
+
+.expense {
+  color: var(--red);
+}
+
+.txn-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-detail {
+  padding: 12px 16px 12px 40px;
+  background: #fafbfc;
+}
+
+.txn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.txn-table th {
+  text-align: left;
+  padding: 6px 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-table th:nth-child(n+3) {
+  text-align: right;
+}
+
+.txn-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-table td:nth-child(n+3) {
+  text-align: right;
+}
+
+.txn-table tr.transfer td {
+  opacity: 0.5;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.transfer-badge {
+  background: var(--gray-light);
+  color: var(--text-secondary);
+}
+
+.real-badge {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+.accounts-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  background: var(--card-bg);
+  padding: 12px 16px;
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.date-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+
+.date-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.filter-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  background: var(--card-bg);
+}
+
+.filter-select:focus {
+  border-color: var(--primary);
+}
+
+.filter-separator {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.counterparty {
+  font-size: 11px;
+  color: var(--primary);
+  margin-left: 8px;
+}
+
+.counterparty::before {
+  content: "⇄ ";
+}

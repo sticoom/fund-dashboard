@@ -1,0 +1,227 @@
+.overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.overview-header h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.date-badge {
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.loading {
+  text-align: center;
+  padding: 60px;
+  color: var(--text-secondary);
+  font-size: 16px;
+}
+
+/* Transfer info card */
+.transfer-card {
+  background: var(--card-bg);
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.transfer-info {
+  padding: 0 4px;
+}
+
+.transfer-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  font-size: 14px;
+}
+
+.transfer-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.transfer-value.gray {
+  color: var(--text-secondary);
+}
+
+.transfer-divider {
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+.transfer-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Account details section */
+.accounts-section {
+  margin-top: 8px;
+}
+
+.accounts-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.accounts-section-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.search-input {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* Accounts table */
+.accounts-table-wrap {
+  background: var(--card-bg);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.accounts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.accounts-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  background: var(--gray-light);
+}
+
+.accounts-table th:nth-child(n+2) {
+  text-align: right;
+}
+
+.accounts-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.accounts-table td:nth-child(n+2) {
+  text-align: right;
+}
+
+.account-row:hover {
+  background: var(--gray-light);
+}
+
+.account-name {
+  font-weight: 500;
+}
+
+.expand-icon {
+  margin-right: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.income {
+  color: var(--green);
+}
+
+.expense {
+  color: var(--red);
+}
+
+/* Transaction detail rows */
+.txn-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-detail {
+  padding: 12px 16px 12px 40px;
+  background: #fafbfc;
+}
+
+.txn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.txn-table th {
+  text-align: left;
+  padding: 6px 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-table th:nth-child(n+3) {
+  text-align: right;
+}
+
+.txn-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.txn-table td:nth-child(n+3) {
+  text-align: right;
+}
+
+.txn-table tr.transfer td {
+  opacity: 0.5;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.transfer-badge {
+  background: var(--gray-light);
+  color: var(--text-secondary);
+}
+
+.real-badge {
+  background: var(--green-light);
+  color: var(--green);
+}
