@@ -9,6 +9,7 @@ Production:   python server.py --prod   (serve frontend/dist + API on :8000)
 """
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -22,10 +23,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 BACKEND_DIR = Path(__file__).parent
 PROJECT_DIR = BACKEND_DIR.parent
-FRONTEND_DIST = PROJECT_DIR / "frontend" / "dist"
+# Docker: /app/frontend_dist; Local: backend/../frontend/dist
+FRONTEND_DIST = Path("/app/frontend_dist") if (Path("/app/frontend_dist")).exists() else PROJECT_DIR / "frontend" / "dist"
 DATA_DIR = PROJECT_DIR / "frontend" / "public" / "data"
 DIST_DATA_DIR = FRONTEND_DIST / "data"
-PORT = 8000
+PORT = int(os.environ.get("PORT", 8000))
 
 app = FastAPI(title="资金核对看板 API")
 
