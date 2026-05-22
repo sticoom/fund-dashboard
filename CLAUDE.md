@@ -1,142 +1,118 @@
-# CLAUDE.md — 资金核对看板
+---
+version: "2.0"
+last_verified: "2026-05-22"
+tags: [finance, excel, reconciliation, fastapi, react]
+dependencies:
+  - python >= 3.10
+  - node >= 20
+  - openpyxl >= 3.1
+  - msoffcrypto-tool >= 4.12
+  - fastapi >= 0.100
+  - react >= 19
+---
 
-## 项目概述
+# 资金核对看板
 
-每日资金核对看板。用户上传加密 Excel 资金流动表，系统自动解密、解析公式、核对各子账户收支数据，验证余额平衡后以卡片式看板展示。
+> **TL;DR** — 用户每日上传加密 Excel 资金流动表，系统解密 → 解析公式 → 核对各子账户收支 → 验证余额平衡 → 卡片式看板展示。无历史存储，每次上传覆盖上一次。
 
-**核心场景**：财务人员每日上传资金报表 → 自动核对 → 查看结果，不做历史存储。
+## 触发条件
 
-## 技术栈
+当用户需要：
+- 对每日资金报表做自动化收支核对
+- 验证"期初 + 收入 - 支出 = 期末"余额平衡
+- 区分"实际收支"和"往来（内部转账）"
+- 按账户类型分组展示（收款/付款/收支）
 
-- **后端**: Python 3 / FastAPI / openpyxl / msoffcrypto-tool
-- **前端**: React 19 / TypeScript / Vite
-- **无数据库**：核对结果直接写入 JSON 文件，前端 fetch 读取
-
-## 项目结构
+## 架构概述
 
 ```
-fund-dashboard/
-├── backend/
-│   ├── server.py          # FastAPI 服务：上传接口 + 静态文件托管
-│   ├── verify.py          # 核心核对引擎（公式感知）
-│   ├── parser.py          # Excel 解析工具：解密、日期提取、子表解析
-│   ├── config.py          # 配置：密码、列映射、币种、往来关键词
-│   ├── classifier.py      # 分类器：判断交易是否为"往来"（内部转账）
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx            # 主布局：顶部导航 + 上传按钮
-│   │   ├── pages/
-│   │   │   ├── Summary.tsx    # 核对总表（按收款/付款/收支分组）
-│   │   │   └── Detail.tsx     # 详情页（按子表展开、按分类分组）
-│   │   ├── App.css / index.css
-│   │   └── pages/*.css
-│   ├── public/data/           # JSON 输出目录（运行时生成）
-│   └── vite.config.ts         # 开发模式代理 /api → :8000
-└── CLAUDE.md
+用户上传 .xlsx
+    ↓
+server.py [/api/upload]
+    ↓
+verify.py ← 核心引擎
+    ├── parser.py      解密 + 解析子表交易
+    ├── config.py      币种/列映射/关键词
+    └── classifier.py  往来识别
+    ↓
+verification.json → 前端 fetch 读取
 ```
 
-## 运行方式
+**数据流**：Excel → 解密 → 双 workbook（取值+取公式）→ 公式解析 → 核对 → JSON → 前端渲染
 
-### 开发
+**关键约束**：
+- 无数据库，核对结果是瞬态的（JSON 文件）
+- 前端同时写入 `public/data/`（dev）和 `dist/data/`（prod）两个目录
+- 生产模式 `python server.py --prod` 由 FastAPI 直接托管前端静态文件
+
+## 快速启动
 
 ```bash
-# 后端
-cd backend && pip install -r requirements.txt && python server.py
-# 前端（新终端）
-cd frontend && npm install && npm run dev
-# 访问 http://localhost:5173
-```
+# 开发
+cd backend && pip install -r requirements.txt && python server.py        # :8000
+cd frontend && npm install && npm run dev                                 # :5173 (代理 /api → :8000)
 
-### 生产
-
-```bash
+# 生产
 cd frontend && npm run build
-cd backend && EXCEL_PASSWORD=xxx python server.py --prod
-# 访问 http://localhost:8000
+cd backend && EXCEL_PASSWORD=xxx python server.py --prod                  # :8000
+
+# Docker
+docker build -t fund-dashboard .
+docker run -e EXCEL_PASSWORD=xxx -p 8000:8000 fund-dashboard
 ```
 
-## 环境变量
+## 核心业务逻辑
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `EXCEL_PASSWORD` | Excel 解密密码 | `delamu` |
+### 日报汇总的双区结构（⚠️ 最关键的知识点）
 
-## 核心业务逻辑（重要）
-
-### Excel 文件结构
-
-上传的 Excel 是加密的 `.xlsx` 文件，密码通过环境变量配置。文件包含：
-
-1. **日报汇总** sheet — 汇总所有账户数据，分为上下两个区域
-2. **子表**（如 "德拉姆pingpong-美元"、"工行基本户" 等）— 各账户的交易明细
-
-### 日报汇总的双区结构（最关键的知识点）
+这是整个核对引擎的基础。日报汇总 sheet 分为上下两区，通过公式关联：
 
 ```
-上区 (rows 5 ~ 总计行-1)：RMB 人民币值
-  D列=昨日余额(¥), E列=本日收款(¥), F列=本日付款(¥), G列=本日余额(¥)
-  外币账户公式: =D{下区行号}*$L${下区行号}  （本币 × 汇率 = RMB）
-  CNY账户公式: 直接 SUMIF 引用子表列
-
-下区 (rows 总计行+1 ~ 末尾)：原始币种值 + 汇率
-  B列=账户名, D列=昨日余额(本币), E列=本日收款(本币), F列=本日付款(本币)
-  L列=汇率（1.0 表示 CNY）
-  E/F列公式: SUMIF(子表!列, 日期, 子表!金额列) 或直接引用子表单元格
-
-总计行: A列含"总计", D列=期初余额总计, G列=期末余额总计
+┌─────────────────────────────────────────────────────────────┐
+│ 上区 (rows 5 ~ 总计行-1)    → RMB 人民币值                  │
+│   D=昨日余额(¥)  E=本日收款(¥)  F=本日付款(¥)  G=本日余额(¥) │
+│                                                              │
+│   外币账户:  =D{下区行}*$L${下区行}  (本币×汇率=RMB)        │
+│   CNY账户:   直接 SUMIF 引用子表列                           │
+├─────────────────────────────────────────────────────────────┤
+│ 总计行: A列含"公司货币资金       总计" ← 搜索此文本定位       │
+│   D=期初余额总计  G=期末余额总计  ← 权威数据源               │
+├─────────────────────────────────────────────────────────────┤
+│ 下区 (rows 总计行+1 ~ 末尾)  → 原始币种值 + 汇率            │
+│   B=账户名  D=昨日余额(本币)  E=本日收款(本币)  F=本日付款   │
+│   L=汇率 (1.0=CNY)                                           │
+│   E/F列公式: SUMIF(子表!列, 日期, 子表!金额列)              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 核对链路
-
+**核对链路**：
 ```
-子表交易明细 → SUMIF 聚合（下区）→ × 汇率（上区）→ RMB 值
-     ↓                ↓                    ↓
-  逐笔核对       本币金额核对          人民币金额核对
+子表交易明细 → SUMIF聚合(下区) → ×汇率(上区) → RMB值
+     ↓              ↓                  ↓
+  逐笔核对     本币金额核对       人民币金额核对
 ```
 
-1. 解密 Excel 两次：`data_only=True`（取值）和 `data_only=False`（取公式）
-2. 解析下区公式，得到 SUMIF 引用的子表名和列
-3. 解析上区公式，找到 `=D{row}*$L${row}` 引用的下区行号
-4. 读取子表当日交易，汇总本币收入/支出
-5. 对比：子表汇总 vs 下区 SUMIF 值（本币核对）
-6. 对比：本币 × 汇率 vs 上区 RMB 值（汇率核对）
-7. 对比：期初 + 收入 - 支出 = 期末（余额平衡核对）
+### 子表两种布局
 
-### 日期来源
+由 `config.py` 中 `PINGPONG_KEYWORDS` 检测，决定列映射：
 
-- **权威来源**：日报汇总 K2 单元格
-- **交叉验证**：文件名中的日期（如 `2026年5月资金流动表5.13.xlsx` → 2026-05-13）
-- 二者不一致时 `date_mismatch` 为 true，以 K2 为准
+| 布局 | 日期 | 摘要 | 分类 | 收入 | 支出 | 余额 |
+|------|------|------|------|------|------|------|
+| 标准 | B | C | D | E | F | G |
+| Pingpong | B | E(备注) | E(备注) | F | G | H |
 
-### 期初余额
+**触发关键词**：子表名含 `pingpong` / `光子易` / `虚拟信用卡` → 使用 Pingpong 布局。
 
-直接读取"公司货币资金 总计"行的 D 列（昨日余额），**不是**各子表求和。
+### 其他业务规则
 
-### 往来（内部转账）识别
-
-`classifier.py` 检查交易的 `summary` 和 `category` 字段是否包含"往来"关键词。往来交易单独标记，不纳入实际收支统计。
-
-### 子表布局差异
-
-存在两种列布局，由 `config.py` 中的关键词检测：
-
-- **标准布局**：A=户名, B=日期, C=摘要, D=分类, E=收入, F=支出, G=余额
-- **Pingpong 布局**：A=账户, B=创建时间, C=店铺地区, D=店铺名, E=备注, F=收入, G=支出, H=余额
-
-### 币种识别
-
-- 子表名含"美元"→ USD，"欧元"→ EUR，"加元"→ CAD 等（`CURRENCY_MAP`）
-- 汇率 = 1.0 → CNY
-- 无明确币种关键词时，按汇率推断（rate > 5 → USD）
-
-## API 接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/upload` | 上传 Excel → 核对 → 写 JSON → 返回摘要 |
-| GET | `/api/status` | 健康检查 |
-| GET | `/data/verification.json` | 前端读取核对结果 |
+- **总计行定位**：搜索 A 列含"公司货币资金       总计"的行（注意中间有空格），该行 D 列 = 期初余额，G 列 = 期末余额
+- **日期来源**：以上传文件名中的日期为准（如 `2026年5月资金流动表5.13.xlsx` → `2026-05-13`），K2 单元格做交叉验证（`date_mismatch` 标记不一致）
+- **期初余额**：直接读取"公司货币资金       总计"行 D 列，**不是**各子表求和
+- **币种与汇率**：以下区 L 列公式中涉及的汇率为准。子表名含"美元"→ USD 等（`CURRENCY_MAP`），汇率=1.0 → CNY，无关键词时按汇率推断
+- **往来识别**：`summary` 或 `category` 含"往来"关键词 → 标记为内部转账，不纳入实际收支。关键词就是"往来"二字，无其他变体
+- **日期过滤**：子表含多日交易，只取 `report_date` 当天的（`txn.date != date` 跳过）
+- **浮点容差**：`TOLERANCE = 0.5`，避免汇率连乘精度差异
+- **公式以实际表格为准**：核对逻辑依赖日报汇总中的公式结构（SUMIF、直接引用、`=D{row}*$L${row}` 等），如报表模板变更需重新确认公式
 
 ### verification.json 结构
 
@@ -160,42 +136,115 @@ cd backend && EXCEL_PASSWORD=xxx python server.py --prod
   "issues_count": 0,
   "sheets": [
     {
-      "sheet_name": "德拉姆pingpong-加元",
+      "sheet_name": "子表名",
+      "summary_name": "日报汇总中的账户名",
       "currency": "CAD",
       "exchange_rate": 5.0224,
       "local_income": 34445.93,
       "rmb_income": 173001.24,
+      "reported_income": 173001.24,
       "income_ok": true,
       "all_ok": true,
       "real_income": 34445.93,
       "transfer_income": 0.0,
-      "transactions": [...]
+      "transactions": [
+        { "summary": "平台收入", "category": "平台收入", "income": 7066.54, "expense": 0, "balance": 14670.95, "is_transfer": false }
+      ]
     }
   ]
 }
 ```
 
-## 前端页面
+## 踩坑记录
 
-### 核对总表 (Summary.tsx)
+### 1. 总计行定位要搜完整文本
+- **症状**：verify.py 用 `"总计" in a_val` 匹配总计行，可能误匹配其他含"总计"的行
+- **原因**：日报汇总 A 列中可能有多行含"总计"字样
+- **解决**：搜索 A 列含 `"公司货币资金"` 且含 `"总计"` 的行，注意原文中"公司货币资金"和"总计"之间有空格。当前代码用 `"总计" in a_val` 匹配，实际运行中只有一行匹配所以暂无问题
+- **验证日期**：2026-05-13
 
-- 顶部 KPI 行：期初余额、本日收款、本日付款、期末余额、净流入
-- 验证条：余额平衡公式 + 收入/支出核对结果
-- 按账户类型分组：收款（绿 ↓）、付款（红 ↑）、收支（蓝 ↕）
-- 每个账户卡片可展开查看交易明细
+### 2. Excel 公式只能用 data_only=False 读取文本
+- **症状**：openpyxl `data_only=True` 时，公式单元格返回 `None` 或计算值，无法拿到公式字符串
+- **原因**：openpyxl 的设计：`data_only=True` 只返回缓存的计算值，不返回公式文本
+- **解决**：必须解密两次，分别用 `data_only=True`（取值）和 `data_only=False`（取公式）打开 workbook
+- **验证日期**：2026-05-13
 
-### 详情页 (Detail.tsx)
+### 3. pingpong虚拟信用卡 是 USD 但名称无币种关键词
+- **症状**：pingpong虚拟信用卡的收入/支出金额很小（income=6.86, expense=2858.76），和子表原始值（1.00, 416.96）不匹配
+- **原因**：该子表是 USD 账户但名称中不含"美元"，日报汇总下区 L 列的汇率 6.8562 才是真实线索
+- **解决**：verify.py 先通过下区汇率判断是否外币（rate != 1.0），再用 `CURRENCY_MAP` 匹配币种名；无法匹配时按汇率阈值推断（rate>5 → USD）
+- **验证日期**：2026-05-13
 
-- 按子表名展开，显示本币/RMB 换算
-- 交易按分类（category）分组显示
-- 支持排除往来交易、搜索子表名
+### 4. 日期正则误解析 "5.13" 为 month=5 day=5
+- **症状**：文件名 `2026年5月资金流动表5.13.xlsx` 解析为 `2026-05-05` 而非 `2026-05-13`
+- **原因**：正则 `(\d+)\.(\d+)` 的 group 索引错误，`m.group(3)` 捕获了月而非日
+- **解决**：修正正则为 `r'(\d{4})年(\d+)月.*?表(\d+)\.(\d+)'`，日期取 `m.group(4)`（点后部分）
+- **验证日期**：2026-05-13
 
-## 注意事项
+### 5. 前端首次加载 404 导致白屏崩溃
+- **症状**：部署后浏览器打开页面白屏，Console 报 `Uncaught TypeError: a is not iterable`
+- **原因**：服务器上尚无 `verification.json`，fetch 返回 404 的 HTML 响应，`.json()` 解析 HTML 后得到非预期对象，React 解构 `{ summary, sheets }` 失败
+- **解决**：① 部署时预置空 JSON 文件（`sheets: []`）② 前端 fetch 应检查 `r.ok` 再解析
+- **验证日期**：2026-05-22
 
-1. **不要硬编码密码**：使用 `EXCEL_PASSWORD` 环境变量，默认值仅用于本地开发
-2. **子表多日数据**：子表包含多日交易，核对时只取 report_date 当天的（`txn.date != date` 跳过）
-3. **精度容差**：浮点对比使用 `TOLERANCE = 0.5`，避免汇率计算精度差异
-4. **前端双目录写入**：server.py 同时写 `public/data`（开发）和 `dist/data`（生产）
-5. **pingpong虚拟信用卡** 是 USD 账户，名称中无币种关键词，需通过汇率推断
-6. **修改 verify.py 要特别谨慎**：公式解析依赖日报汇总的具体行列布局，结构变化可能导致解析失败
-7. **Excel 公式不能 data_only=True 读取**：必须同时开两次 workbook，一次取值、一次取公式文本
+### 6. 上传 API 写入目录和生产模式读取目录不一致
+- **症状**：上传 Excel 后核对成功，但页面刷新仍显示旧数据
+- **原因**：server.py 只写了 `public/data/`（开发目录），但生产模式从 `dist/data/` 读取静态文件
+- **解决**：server.py 同时写两个目录 `for d in [DATA_DIR, DIST_DATA_DIR]`
+- **验证日期**：2026-05-13
+
+### 7. CentOS 7 自带 Python 3.6 无法运行 fastapi
+- **症状**：`pip install fastapi>=0.100.0` 报 `No matching distribution found`
+- **原因**：fastapi >= 0.100 要求 Python >= 3.8，CentOS 7 默认 Python 3.6.8；阿里云内部 PyPI 镜像包版本滞后
+- **解决**：安装 Miniconda → `conda create -n fund python=3.12` → 使用清华 PyPI 镜像 `-i https://pypi.tuna.tsinghua.edu.cn/simple`
+- **验证日期**：2026-05-22
+
+### 8. 端口 8000 被旧进程占用
+- **症状**：`nohup python server.py --prod` 立即退出，日志显示 `address already in use`
+- **原因**：之前测试启动的进程仍在后台运行
+- **解决**：`fuser -k 8000/tcp` 杀旧进程，或 `kill -9 $(ss -tlnp | grep 8000 | grep -o 'pid=[0-9]*' | cut -d= -f2)`
+- **验证日期**：2026-05-22
+
+## 待人工确认项
+
+> 以下基于 2026-05-13 的单个 Excel 样本，部分边界场景需后续验证。
+
+| # | 待确认项 | 当前假设 | 验证方法 |
+|---|---------|---------|---------|
+| 1 | 子表布局是否只有标准和 Pingpong 两种 | 当前只识别这两种 | 新增账户类型时检查列布局是否匹配 |
+| 2 | 文件名日期格式是否只有 `YYYY年M月资金流动表M.DD.xlsx` | 正则仅匹配此格式 | 如文件名格式变化需调整 `_extract_filename_date()` |
+
+## 文件结构
+
+```
+fund-dashboard/
+├── CLAUDE.md
+├── Dockerfile
+├── README.md
+├── .gitignore
+├── backend/
+│   ├── server.py          # FastAPI: 上传接口 + 静态文件托管
+│   ├── verify.py          # 核对引擎: 公式解析 + 余额验证
+│   ├── parser.py          # Excel 工具: 解密、日期、子表解析
+│   ├── config.py          # 配置: 密码(环境变量)、列映射、币种、关键词
+│   ├── classifier.py      # 分类: 往来交易识别
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx         # 主布局: 导航 + 上传
+│   │   ├── App.css
+│   │   ├── index.css       # CSS 变量、全局样式
+│   │   ├── main.tsx
+│   │   └── pages/
+│   │       ├── Summary.tsx  # 核对总表: KPI + 分组卡片
+│   │       ├── Summary.css
+│   │       ├── Detail.tsx   # 详情: 子表展开 + 分类分组
+│   │       └── Detail.css
+│   ├── public/
+│   │   ├── data/           # verification.json (运行时生成)
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   ├── vite.config.ts      # dev 代理 /api → :8000
+│   ├── package.json
+│   └── index.html
+```
