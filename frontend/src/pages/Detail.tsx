@@ -12,27 +12,52 @@ interface Transaction {
 
 interface SheetData {
   sheet_name: string;
+  summary_name: string;
   currency: string;
   exchange_rate: number;
   local_income: number;
   local_expense: number;
+  total_rmb_income: number;
+  total_rmb_expense: number;
   rmb_income: number;
   rmb_expense: number;
+  reported_income: number;
+  reported_expense: number;
+  reported_balance: number;
+  reported_prev: number;
+  income_ok: boolean;
+  expense_ok: boolean;
+  balance_ok: boolean;
+  all_ok: boolean;
   real_income: number;
   real_expense: number;
   transfer_income: number;
   transfer_expense: number;
-  prev_balance: number;
-  reported_income: number;
-  reported_expense: number;
-  reported_balance: number;
-  all_ok: boolean;
   transactions: Transaction[];
 }
 
 interface VerificationData {
   date: string;
-  rates: Record<string, number>;
+  filename: string;
+  summary: {
+    prev_balance: number;
+    balance: number;
+    total_income: number;
+    total_expense: number;
+    income: number;
+    expense: number;
+    net_flow: number;
+    transfer_income: number;
+    transfer_expense: number;
+    reported_income: number;
+    reported_expense: number;
+    reported_balance: number;
+    income_match: boolean;
+    expense_match: boolean;
+    balance_match: boolean;
+  };
+  active_accounts: number;
+  issues_count: number;
   sheets: SheetData[];
 }
 
@@ -47,6 +72,10 @@ function fmtLocal(v: number, currency: string): string {
   };
   const sym = symbols[currency] || currency;
   return `${sym}${v.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function StatusIcon({ ok }: { ok: boolean }) {
+  return ok ? <span className="status-ok">✓</span> : <span className="status-fail">✗</span>;
 }
 
 function Detail() {
@@ -82,7 +111,7 @@ function Detail() {
             className={`filter-tab ${!hideTransfer ? "active" : ""}`}
             onClick={() => setHideTransfer(false)}
           >
-            全部
+            全部（含往来）
           </button>
           <button
             className={`filter-tab ${hideTransfer ? "active" : ""}`}
@@ -99,6 +128,17 @@ function Detail() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {!hideTransfer && (
+        <div className="detail-info-banner">
+          <span>全部视图：展示含内部往来转账的完整收支，用于余额核对。</span>
+        </div>
+      )}
+      {hideTransfer && (
+        <div className="detail-info-banner">
+          <span>排除往来视图：展示不含内部转账的实际收支，用于净收付分析。</span>
+        </div>
+      )}
 
       <div className="detail-cards">
         {filtered.map((sh) => (
@@ -130,7 +170,12 @@ function SheetCard({
   onToggle: () => void;
 }) {
   const isCNY = sh.currency === "CNY";
-  const rateLabel = isCNY ? "" : ` (汇率: ${sh.exchange_rate})`;
+
+  // Pick values based on tab
+  const showIncome = hideTransfer ? (sh.real_income ?? sh.local_income) : sh.local_income;
+  const showExpense = hideTransfer ? (sh.real_expense ?? sh.local_expense) : sh.local_expense;
+  const showRmbIncome = hideTransfer ? sh.rmb_income : (sh.total_rmb_income ?? sh.rmb_income);
+  const showRmbExpense = hideTransfer ? sh.rmb_expense : (sh.total_rmb_expense ?? sh.rmb_expense);
 
   return (
     <div className={`detail-card ${!sh.all_ok ? "has-issue" : ""}`}>
@@ -139,24 +184,24 @@ function SheetCard({
           <span className="expand-icon">{expanded ? "▾" : "▸"}</span>
           <span className="card-account-name">{sh.sheet_name}</span>
           {!sh.all_ok && <span className="issue-badge">差异</span>}
-          <span className="card-currency-tag">{sh.currency}{rateLabel}</span>
+          <span className="card-currency-tag">{sh.currency}{isCNY ? "" : ` ×${sh.exchange_rate}`}</span>
         </div>
         <div className="card-header-nums">
           <span className="card-num income">
-            收 {fmtLocal(sh.local_income, sh.currency)}
-            {!isCNY && <span className="card-rmb">={fmtFull(sh.rmb_income)}</span>}
+            收 {fmtLocal(showIncome, sh.currency)}
+            {!isCNY && <span className="card-rmb">={fmtFull(showRmbIncome)}</span>}
           </span>
           <span className="card-sep">|</span>
           <span className="card-num expense">
-            付 {fmtLocal(sh.local_expense, sh.currency)}
-            {!isCNY && <span className="card-rmb">={fmtFull(sh.rmb_expense)}</span>}
+            付 {fmtLocal(showExpense, sh.currency)}
+            {!isCNY && <span className="card-rmb">={fmtFull(showRmbExpense)}</span>}
           </span>
         </div>
       </div>
 
       {expanded && (
         <div className="detail-card-body">
-          <SheetSummary sheet={sh} />
+          <SheetSummary sheet={sh} hideTransfer={hideTransfer} />
           <CategoryGroups transactions={sh.transactions} currency={sh.currency} hideTransfer={hideTransfer} />
         </div>
       )}
@@ -164,19 +209,49 @@ function SheetCard({
   );
 }
 
-function SheetSummary({ sheet: sh }: { sheet: SheetData }) {
+function SheetSummary({ sheet: sh, hideTransfer }: { sheet: SheetData; hideTransfer: boolean }) {
   const isCNY = sh.currency === "CNY";
+
+  if (hideTransfer) {
+    // 排除往来: show real values only
+    return (
+      <div className="sheet-summary">
+        <div className="summary-item">
+          <span className="summary-label">净收款</span>
+          <span className="summary-value">{fmtLocal(sh.real_income, sh.currency)}</span>
+          {!isCNY && <span className="summary-rmb">= {fmtFull(sh.rmb_income)}</span>}
+        </div>
+        <div className="summary-item">
+          <span className="summary-label">净付款</span>
+          <span className="summary-value">{fmtLocal(sh.real_expense, sh.currency)}</span>
+          {!isCNY && <span className="summary-rmb">= {fmtFull(sh.rmb_expense)}</span>}
+        </div>
+        <div className="summary-item">
+          <span className="summary-label">核对</span>
+          <span className="summary-value">
+            <StatusIcon ok={sh.all_ok} />
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 全部: show total values with transfer breakdown
   return (
     <div className="sheet-summary">
       <div className="summary-item">
-        <span className="summary-label">本币收入</span>
-        <span className="summary-value">{fmtLocal(sh.local_income, sh.currency)}</span>
-        {!isCNY && <span className="summary-rmb">= {fmtFull(sh.rmb_income)}</span>}
+        <span className="summary-label">期初余额</span>
+        <span className="summary-value">{fmtFull(sh.reported_prev ?? 0)}</span>
       </div>
       <div className="summary-item">
-        <span className="summary-label">本币支出</span>
+        <span className="summary-label">总收款</span>
+        <span className="summary-value">{fmtLocal(sh.local_income, sh.currency)}</span>
+        {!isCNY && <span className="summary-rmb">= {fmtFull(sh.total_rmb_income ?? sh.rmb_income)}</span>}
+      </div>
+      <div className="summary-item">
+        <span className="summary-label">总付款</span>
         <span className="summary-value">{fmtLocal(sh.local_expense, sh.currency)}</span>
-        {!isCNY && <span className="summary-rmb">= {fmtFull(sh.rmb_expense)}</span>}
+        {!isCNY && <span className="summary-rmb">= {fmtFull(sh.total_rmb_expense ?? sh.rmb_expense)}</span>}
       </div>
       {(sh.transfer_income > 0.01 || sh.transfer_expense > 0.01) && (
         <div className="summary-item transfer-item">
@@ -187,9 +262,13 @@ function SheetSummary({ sheet: sh }: { sheet: SheetData }) {
         </div>
       )}
       <div className="summary-item">
-        <span className="summary-label">实际</span>
+        <span className="summary-label">期末余额</span>
+        <span className="summary-value">{fmtFull(sh.reported_balance ?? 0)}</span>
+      </div>
+      <div className="summary-item">
+        <span className="summary-label">核对</span>
         <span className="summary-value">
-          {fmtLocal(sh.real_income, sh.currency)} / {fmtLocal(sh.real_expense, sh.currency)}
+          <StatusIcon ok={sh.all_ok} />
         </span>
       </div>
     </div>

@@ -325,3 +325,19 @@
 
 .income { color: var(--green); }
 .expense { color: var(--red); }
+
+.detail-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.status-ok { color: var(--green); font-weight: 700; }
+.status-fail { color: var(--red); font-weight: 700; }

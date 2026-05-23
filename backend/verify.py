@@ -25,10 +25,162 @@ from parser import (
     safe_float,
     safe_str,
 )
-from classifier import is_transfer
+from classifier import is_transfer, TRANSFER_KEYWORDS
 from config import EXCEL_PASSWORD, SKIP_SHEETS, CURRENCY_MAP
 
 TOLERANCE = 0.5
+
+
+def _eval_sumif(wb: openpyxl.Workbook, formula: str, date: str) -> tuple[float, float]:
+    """Evaluate a SUMIF formula directly by reading the detail sheet.
+
+    Returns (total, transfer_amount) for rows matching the given date.
+    Transfer detection checks all text columns for keywords like '往来'.
+    """
+    if not formula or not str(formula).startswith("=SUMIF"):
+        return 0.0, 0.0
+    formula = str(formula)
+
+    # Extract SUMIF arguments: (range1, criteria, range2)
+    # Remove =SUMIF( prefix and trailing )
+    inner = formula[len("=SUMIF("):]
+    if inner.endswith(")"):
+        inner = inner[:-1]
+
+    # Split on commas, but respect quoted sheet names with commas inside
+    # e.g., SUMIF('Sheet, Inc.'!B:B, K2, 'Sheet, Inc.'!E:E)
+    parts = []
+    depth = 0
+    current = ""
+    in_quote = False
+    for ch in inner:
+        if ch == "'" and not in_quote:
+            in_quote = True
+            current += ch
+        elif ch == "'" and in_quote:
+            in_quote = False
+            current += ch
+        elif ch == "(" and not in_quote:
+            depth += 1
+            current += ch
+        elif ch == ")" and not in_quote:
+            depth -= 1
+            current += ch
+        elif ch == "," and depth == 0 and not in_quote:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += ch
+    if current.strip():
+        parts.append(current.strip())
+
+    if len(parts) < 3:
+        return 0.0, 0.0
+
+    criteria_range = parts[0]  # e.g. 'SheetName'!B3:B19
+    # criteria = parts[1]  # e.g. $K$2 -- we already know it's the date
+    sum_range = parts[2]  # e.g. 'SheetName'!E3:E19
+
+    # Parse sheet name and range from criteria_range
+    sheet_name, crit_start_row, crit_end_row, crit_col = _parse_sheet_range(criteria_range)
+    if not sheet_name:
+        return 0.0, 0.0
+
+    # Parse sheet name and range from sum_range
+    _, sum_start_row, sum_end_row, sum_col = _parse_sheet_range(sum_range)
+
+    if sheet_name not in wb.sheetnames:
+        return 0.0, 0.0
+
+    ws = wb[sheet_name]
+
+    # Determine row range
+    start_row = max(crit_start_row or 1, sum_start_row or 1)
+    end_row = max(crit_end_row or ws.max_row, sum_end_row or ws.max_row)
+
+    total = 0.0
+    transfer_total = 0.0
+    for r in range(start_row, end_row + 1):
+        # Check date match in criteria column
+        cell_val = ws.cell(r, crit_col).value
+        if cell_val is None:
+            continue
+        cell_date = _format_date_val(cell_val)
+        if cell_date == date:
+            val = safe_float(ws.cell(r, sum_col).value)
+            total += val
+            # Transfer detection: check all text columns for '往来'
+            row_text = " ".join(
+                str(ws.cell(r, c).value or "")
+                for c in range(1, ws.max_column + 1)
+            )
+            if any(kw in row_text for kw in TRANSFER_KEYWORDS):
+                transfer_total += val
+
+    return total, transfer_total
+
+
+def _parse_sheet_range(range_str: str) -> tuple[str, int | None, int | None, int]:
+    """Parse a range reference like 'SheetName'!B3:B19 or SheetName!$B:$B.
+
+    Returns (sheet_name, start_row_or_None, end_row_or_None, col_index).
+    """
+    sheet_name = ""
+    range_part = range_str
+
+    if "'" in range_str:
+        m = re.match(r"'([^']+)'" + r"!(.*)", range_str)
+        if m:
+            sheet_name = m.group(1)
+            range_part = m.group(2)
+    elif "!" in range_str:
+        idx = range_str.index("!")
+        sheet_name = range_str[:idx]
+        range_part = range_str[idx + 1:]
+
+    # Remove $ signs
+    range_part = range_part.replace("$", "")
+
+    # Parse column range: B3:B19 or B:B
+    m = re.match(r"([A-Z]+)(\d*):([A-Z]+)(\d*)", range_part, re.IGNORECASE)
+    if not m:
+        return sheet_name, None, None, 0
+
+    col_letter = m.group(1).upper()
+    start_row = int(m.group(2)) if m.group(2) else None
+    end_row = int(m.group(4)) if m.group(4) else None
+
+    col_idx = _col_letter_to_idx(col_letter)
+
+    return sheet_name, start_row, end_row, col_idx
+
+
+def _format_date_val(value) -> str:
+    """Format a cell value as YYYY-MM-DD date string."""
+    if value is None:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    val_str = str(value).strip()
+    if not val_str:
+        return ""
+    # Try numeric (Excel serial)
+    try:
+        from datetime import datetime, timedelta
+        serial = float(val_str)
+        base_date = datetime(1899, 12, 30)
+        return (base_date + timedelta(days=serial)).strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OverflowError):
+        pass
+    # String patterns
+    for pattern, fmt in [
+        (r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", "{0}-{1:0>2}-{2:0>2}"),
+        (r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", "{2}-{1:0>2}-{0:0>2}"),
+    ]:
+        m = re.match(pattern, val_str)
+        if m:
+            return fmt.format(*m.groups())
+    return val_str
 
 
 def _decrypt(filepath: str, data_only: bool) -> openpyxl.Workbook:
@@ -172,8 +324,8 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         if rate == 0:
             rate = 1.0
         prev_local = safe_float(ws_data.cell(r, 4).value)  # D column (local currency)
-        income_local = safe_float(ws_data.cell(r, 5).value)  # E column (SUMIF result)
-        expense_local = safe_float(ws_data.cell(r, 6).value)  # F column (SUMIF result)
+        income_local_cache = safe_float(ws_data.cell(r, 5).value)  # E column (SUMIF cache)
+        expense_local_cache = safe_float(ws_data.cell(r, 6).value)  # F column (SUMIF cache)
 
         # Parse formulas to get sub-sheet and column references
         income_formula = str(ws_formulas.cell(r, 5).value or "")
@@ -182,6 +334,20 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         income_ref = _parse_sumif(income_formula)
         expense_ref = _parse_sumif(expense_formula)
 
+        # Evaluate SUMIF directly from detail sheets (bypasses stale cache)
+        if income_formula.startswith("=SUMIF"):
+            income_local, income_transfer = _eval_sumif(wb_data, income_formula, date)
+        else:
+            income_local, income_transfer = income_local_cache, 0.0
+        if expense_formula.startswith("=SUMIF"):
+            expense_local, expense_transfer = _eval_sumif(wb_data, expense_formula, date)
+        else:
+            expense_local, expense_transfer = expense_local_cache, 0.0
+
+        # Expense column may have negative values (accounting convention) — use absolute value
+        expense_local = abs(expense_local)
+        expense_transfer = abs(expense_transfer)
+
         info = {
             "name": name,
             "row": r,
@@ -189,6 +355,10 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             "prev_local": prev_local,
             "income_local": income_local,
             "expense_local": expense_local,
+            "income_transfer": income_transfer,
+            "expense_transfer": expense_transfer,
+            "income_local_cache": income_local_cache,
+            "expense_local_cache": expense_local_cache,
             "income_sheet": income_ref[0] if income_ref else None,
             "income_col": income_ref[1] if income_ref else None,
             "expense_sheet": expense_ref[0] if expense_ref else None,
@@ -310,7 +480,7 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             else:
                 currency = "USD" if rate > 5 else "OTH"
 
-        # Compute from sub-sheet transactions
+        # Compute from sub-sheet transactions using SUMIF evaluation
         calc_local_income = 0.0
         calc_local_expense = 0.0
         real_income = 0.0
@@ -319,20 +489,41 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         transfer_expense = 0.0
         txns = []
 
+        # Get the actual SUMIF formulas for this upper row
+        e_formula_upper = str(ws_formulas.cell(upper["row"], 5).value or "")
+        f_formula_upper = str(ws_formulas.cell(upper["row"], 6).value or "")
+
+        if upper["lower_ref"] and upper["lower_ref"] in lower_rows:
+            # Foreign currency: use lower section _eval_sumif result
+            lower = lower_rows[upper["lower_ref"]]
+            calc_local_income = lower["income_local"]
+            calc_local_expense = lower["expense_local"]
+            transfer_local_income = lower["income_transfer"]
+            transfer_local_expense = lower["expense_transfer"]
+        elif e_formula_upper.startswith("=SUMIF"):
+            # CNY account with direct SUMIF in upper section
+            calc_local_income, transfer_local_income = _eval_sumif(wb_data, e_formula_upper, date)
+            if f_formula_upper.startswith("=SUMIF"):
+                calc_local_expense, transfer_local_expense = _eval_sumif(wb_data, f_formula_upper, date)
+            else:
+                calc_local_expense, transfer_local_expense = 0.0, 0.0
+            # Expense may be negative (accounting convention) — use absolute value
+            calc_local_expense = abs(calc_local_expense)
+            transfer_local_expense = abs(transfer_local_expense)
+        elif upper["direct_ref"]:
+            # Direct cell reference: use formula cache value
+            calc_local_income = upper["income_rmb"]
+            calc_local_expense = abs(upper["expense_rmb"])
+            transfer_local_income = 0.0
+            transfer_local_expense = 0.0
+
+        # Parse transactions for display and transfer classification
         if sheet_name in wb_data.sheetnames and sheet_name not in SKIP_SHEETS:
             ws = wb_data[sheet_name]
             result = parse_sheet(ws, sheet_name)
             for txn in result.transactions:
                 if txn.date and txn.date != date:
                     continue
-                calc_local_income += txn.income
-                calc_local_expense += txn.expense
-                if is_transfer(txn):
-                    transfer_income += txn.income
-                    transfer_expense += txn.expense
-                else:
-                    real_income += txn.income
-                    real_expense += txn.expense
                 txns.append({
                     "summary": txn.summary,
                     "category": txn.category,
@@ -342,9 +533,13 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
                     "is_transfer": is_transfer(txn),
                 })
 
+        # Real income/expense (excluding transfers) from _eval_sumif
+        real_local_income = calc_local_income - transfer_local_income
+        real_local_expense = calc_local_expense - transfer_local_expense
+
         # Verification
         income_ok = abs(calc_local_income - income_local_reported) < TOLERANCE
-        expense_ok = abs(calc_local_expense - expense_local_reported) < TOLERANCE
+        expense_ok = abs(calc_local_expense - abs(expense_local_reported)) < TOLERANCE
 
         # Balance check: prev + income - expense = balance
         expected_balance = upper["prev_rmb"] + upper["income_rmb"] - upper["expense_rmb"]
@@ -352,6 +547,10 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
 
         calc_rmb_income = calc_local_income * rate
         calc_rmb_expense = calc_local_expense * rate
+        real_rmb_income = real_local_income * rate
+        real_rmb_expense = real_local_expense * rate
+        transfer_rmb_income = transfer_local_income * rate
+        transfer_rmb_expense = transfer_local_expense * rate
 
         active_sheets.append({
             "sheet_name": sheet_name,
@@ -361,8 +560,10 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             "prev_local": prev_local_reported,
             "local_income": calc_local_income,
             "local_expense": calc_local_expense,
-            "rmb_income": calc_rmb_income,
-            "rmb_expense": calc_rmb_expense,
+            "total_rmb_income": calc_rmb_income,
+            "total_rmb_expense": calc_rmb_expense,
+            "rmb_income": real_rmb_income,
+            "rmb_expense": real_rmb_expense,
             "reported_income": upper["income_rmb"],
             "reported_expense": upper["expense_rmb"],
             "reported_balance": upper["balance_rmb"],
@@ -373,10 +574,10 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             "all_ok": income_ok and expense_ok and balance_ok,
             "income_diff": calc_local_income - income_local_reported,
             "expense_diff": calc_local_expense - expense_local_reported,
-            "real_income": real_income,
-            "real_expense": real_expense,
-            "transfer_income": transfer_income,
-            "transfer_expense": transfer_expense,
+            "real_income": real_local_income,
+            "real_expense": real_local_expense,
+            "transfer_income": transfer_local_income,
+            "transfer_expense": transfer_local_expense,
             "transactions": txns,
             "formula_source": "lower_ref" if lower else ("direct_sumif" if upper["direct_sumif"] else "direct_ref" if upper["direct_ref"] else "unknown"),
         })
@@ -384,8 +585,18 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
     wb_data.close()
     wb_formulas.close()
 
-    total_calc_income = sum(s["rmb_income"] for s in active_sheets)
-    total_calc_expense = sum(s["rmb_expense"] for s in active_sheets)
+    # Use computed values for summary (bypasses stale formula cache)
+    # Total income/expense (INCLUDING transfers) - matches Excel table
+    total_all_income = sum(s["total_rmb_income"] for s in active_sheets)
+    total_all_expense = sum(s["total_rmb_expense"] for s in active_sheets)
+    # Real income/expense (EXCLUDING transfers) - actual business flow
+    total_real_income = sum(s["rmb_income"] for s in active_sheets)
+    total_real_expense = sum(s["rmb_expense"] for s in active_sheets)
+    # Transfer amounts
+    total_transfer_income = sum(s["transfer_income"] * s["exchange_rate"] for s in active_sheets)
+    total_transfer_expense = sum(s["transfer_expense"] * s["exchange_rate"] for s in active_sheets)
+    # Balance uses total (including transfers)
+    computed_balance = total_prev + total_all_income - total_all_expense
     issues = [s for s in active_sheets if not s["all_ok"]]
 
     return {
@@ -396,15 +607,23 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         "date_mismatch": date_mismatch,
         "summary": {
             "prev_balance": total_prev,
-            "income": total_income,
-            "expense": total_expense,
-            "balance": total_balance,
-            "net_flow": total_income - total_expense,
-            "calc_income": total_calc_income,
-            "calc_expense": total_calc_expense,
-            "income_match": abs(total_calc_income - total_income) < TOLERANCE,
-            "expense_match": abs(total_calc_expense - total_expense) < TOLERANCE,
-            "expected_balance": total_prev + total_income - total_expense,
+            "balance": computed_balance,
+            # Total (including transfers) - matches Excel verification
+            "total_income": total_all_income,
+            "total_expense": total_all_expense,
+            # Real (excluding transfers) - actual business flow
+            "income": total_real_income,
+            "expense": total_real_expense,
+            "net_flow": total_real_income - total_real_expense,
+            # Transfer detail
+            "transfer_income": total_transfer_income,
+            "transfer_expense": total_transfer_expense,
+            # Formula cache comparison
+            "reported_income": total_income,
+            "reported_expense": total_expense,
+            "reported_balance": total_balance,
+            "income_match": abs(total_all_income - total_income) < TOLERANCE,
+            "expense_match": abs(total_all_expense - total_expense) < TOLERANCE,
             "balance_match": abs(total_balance - (total_prev + total_income - total_expense)) < TOLERANCE,
         },
         "active_accounts": len(active_sheets),
