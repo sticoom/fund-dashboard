@@ -90,8 +90,23 @@ async def status():
 
 def _mount_prod():
     from fastapi.staticfiles import StaticFiles
-    if FRONTEND_DIST.exists():
-        app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static")
+    from fastapi.responses import FileResponse
+
+    if not FRONTEND_DIST.exists():
+        return
+
+    # Mount static assets (js, css, images, data, etc.)
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    # SPA fallback: any non-API, non-file route → index.html
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # Serve real files if they exist (data/, favicon, etc.)
+        file_path = FRONTEND_DIST / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(str(file_path))
+        # Everything else → index.html (SPA routing)
+        return FileResponse(str(FRONTEND_DIST / "index.html"))
 
 
 if __name__ == "__main__":
