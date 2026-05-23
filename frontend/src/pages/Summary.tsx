@@ -107,7 +107,7 @@ function Summary() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(["income", "mixed", "expense"]));
 
   useEffect(() => {
-    fetch("/data/verification.json")
+    fetch(`/data/verification.json?t=${Date.now()}`)
       .then((r) => r.json())
       .then(setData)
       .catch(console.error);

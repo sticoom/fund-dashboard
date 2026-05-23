@@ -85,7 +85,7 @@ function Detail() {
   const [hideTransfer, setHideTransfer] = useState(false);
 
   useEffect(() => {
-    fetch("/data/verification.json")
+    fetch(`/data/verification.json?t=${Date.now()}`)
       .then((r) => r.json())
       .then(setData)
       .catch(console.error);

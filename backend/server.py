@@ -101,10 +101,17 @@ def _mount_prod():
     # SPA fallback: any non-API, non-file route → index.html
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str):
-        # Serve real files if they exist (data/, favicon, etc.)
+        from starlette.responses import FileResponse as StarletteFileResponse
+
         file_path = FRONTEND_DIST / full_path
         if full_path and file_path.is_file():
-            return FileResponse(str(file_path))
+            headers = {}
+            # Never cache verification.json — always return latest after upload
+            if full_path.endswith("verification.json"):
+                headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                headers["Pragma"] = "no-cache"
+                headers["Expires"] = "0"
+            return StarletteFileResponse(str(file_path), headers=headers)
         # Everything else → index.html (SPA routing)
         return FileResponse(str(FRONTEND_DIST / "index.html"))
 
