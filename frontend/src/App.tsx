@@ -1,16 +1,14 @@
 import { useRef, useState } from "react";
 import Summary from "./pages/Summary";
-import Detail from "./pages/Detail";
+import FxLoss from "./pages/FxLoss";
 import "./App.css";
-
-type Tab = "summary" | "detail";
 
 function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("summary");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [page, setPage] = useState<"summary" | "fxloss">("summary");
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -44,16 +42,16 @@ function App() {
         </div>
         <nav className="app-nav">
           <button
-            className={`nav-link ${tab === "summary" ? "active" : ""}`}
-            onClick={() => setTab("summary")}
+            className={`nav-link ${page === "summary" ? "active" : ""}`}
+            onClick={() => setPage("summary")}
           >
             核对总表
           </button>
           <button
-            className={`nav-link ${tab === "detail" ? "active" : ""}`}
-            onClick={() => setTab("detail")}
+            className={`nav-link ${page === "fxloss" ? "active" : ""}`}
+            onClick={() => setPage("fxloss")}
           >
-            详情
+            汇损分析
           </button>
         </nav>
         <div className="header-right">
@@ -79,7 +77,7 @@ function App() {
         </div>
       </header>
       <main className="app-main">
-        {tab === "summary" ? <Summary key={refreshKey} /> : <Detail key={refreshKey} />}
+        {page === "summary" ? <Summary key={refreshKey} /> : <FxLoss />}
       </main>
     </div>
   );

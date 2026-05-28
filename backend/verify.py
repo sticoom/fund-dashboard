@@ -25,7 +25,7 @@ from parser import (
     safe_float,
     safe_str,
 )
-from classifier import is_transfer, TRANSFER_KEYWORDS
+from classifier import is_transfer, TRANSFER_KEYWORDS, is_suspected_transfer, find_cross_sheet_pairs
 from config import EXCEL_PASSWORD, SKIP_SHEETS, CURRENCY_MAP
 
 TOLERANCE = 0.5
@@ -552,6 +552,11 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         transfer_rmb_income = transfer_local_income * rate
         transfer_rmb_expense = transfer_local_expense * rate
 
+        real_income_rmb = real_income * rate
+        real_expense_rmb = real_expense * rate
+        transfer_income_rmb = transfer_income * rate
+        transfer_expense_rmb = transfer_expense * rate
+
         active_sheets.append({
             "sheet_name": sheet_name,
             "summary_name": upper["name"],
@@ -576,8 +581,12 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             "expense_diff": calc_local_expense - expense_local_reported,
             "real_income": real_local_income,
             "real_expense": real_local_expense,
+            "real_income_rmb": real_rmb_income,
+            "real_expense_rmb": real_rmb_expense,
             "transfer_income": transfer_local_income,
             "transfer_expense": transfer_local_expense,
+            "transfer_income_rmb": transfer_rmb_income,
+            "transfer_expense_rmb": transfer_rmb_expense,
             "transactions": txns,
             "formula_source": "lower_ref" if lower else ("direct_sumif" if upper["direct_sumif"] else "direct_ref" if upper["direct_ref"] else "unknown"),
         })
@@ -599,6 +608,68 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
     computed_balance = total_prev + total_all_income - total_all_expense
     issues = [s for s in active_sheets if not s["all_ok"]]
 
+    # ---- Cross-sheet transfer reconciliation (Layer 2) ----
+    # Collect all transactions for cross-sheet pairing
+    all_txns = []
+    for s in active_sheets:
+        for t in s.get("transactions", []):
+            all_txns.append(t)
+
+    warnings = []
+
+    # Find suspected transfers (Layer 1.5: keyword-based suspicion)
+    for t in all_txns:
+        if not t.get("is_transfer") and _txn_is_suspected(t):
+            warnings.append({
+                "type": "suspected_transfer",
+                "sheet": t.get("sheet_name", ""),
+                "category": t.get("category", ""),
+                "summary": t.get("summary", ""),
+                "income": t.get("income", 0),
+                "expense": t.get("expense", 0),
+                "message": f"[{t.get('category', '')}] {t.get('summary', '')} 疑似内部往来但未标记为往来",
+            })
+
+    # Find cross-sheet pairs by amount matching (Layer 2)
+    amount_warnings = _find_amount_pairs(active_sheets)
+    warnings.extend(amount_warnings)
+
+    # ---- Transfer summary for transfer reconciliation page ----
+    transfer_sheets = []
+    for s in active_sheets:
+        transfer_txns = [t for t in s.get("transactions", []) if t.get("is_transfer")]
+        if transfer_txns or s["transfer_income"] > 0.01 or s["transfer_expense"] > 0.01:
+            transfer_sheets.append({
+                "sheet_name": s["sheet_name"],
+                "currency": s["currency"],
+                "exchange_rate": s["exchange_rate"],
+                "transfer_income": s["transfer_income"],
+                "transfer_expense": s["transfer_expense"],
+                "transfer_income_rmb": s["transfer_income_rmb"],
+                "transfer_expense_rmb": s["transfer_expense_rmb"],
+                "net": s["transfer_income"] - s["transfer_expense"],
+                "net_rmb": s["transfer_income_rmb"] - s["transfer_expense_rmb"],
+                "transactions": transfer_txns,
+            })
+
+    total_transfer_income_rmb = sum(s["transfer_income_rmb"] for s in active_sheets)
+    total_transfer_expense_rmb = sum(s["transfer_expense_rmb"] for s in active_sheets)
+    transfer_diff_rmb = total_transfer_income_rmb - total_transfer_expense_rmb
+
+    total_real_income_rmb = sum(s["real_income_rmb"] for s in active_sheets)
+    total_real_expense_rmb = sum(s["real_expense_rmb"] for s in active_sheets)
+
+    transfer_summary = {
+        "total_income_rmb": total_transfer_income_rmb,
+        "total_expense_rmb": total_transfer_expense_rmb,
+        "diff_rmb": transfer_diff_rmb,
+        "balanced": abs(transfer_diff_rmb) < 1.0,
+        "sheets": transfer_sheets,
+    }
+
+    # ---- FX loss analysis ----
+    fx_loss = _build_fx_loss_pairs(active_sheets)
+
     return {
         "date": date,
         "filename": Path(filepath).name,
@@ -607,26 +678,200 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         "date_mismatch": date_mismatch,
         "summary": {
             "prev_balance": total_prev,
-            "balance": computed_balance,
+            "balance": total_balance,
             # Total (including transfers) - matches Excel verification
             "total_income": total_all_income,
             "total_expense": total_all_expense,
-            # Real (excluding transfers) - actual business flow
-            "income": total_real_income,
-            "expense": total_real_expense,
-            "net_flow": total_real_income - total_real_expense,
-            # Transfer detail
-            "transfer_income": total_transfer_income,
-            "transfer_expense": total_transfer_expense,
+            # Reported values from Excel (authoritative)
+            "income": total_income,
+            "expense": total_expense,
+            "net_flow": total_income - total_expense,
+            # Real (excluding transfers) - actual business flow (RMB)
+            "real_income": total_real_income_rmb,
+            "real_expense": total_real_expense_rmb,
+            "real_net": total_real_income_rmb - total_real_expense_rmb,
+            # Transfer detail (RMB)
+            "transfer_income": total_transfer_income_rmb,
+            "transfer_expense": total_transfer_expense_rmb,
             # Formula cache comparison
             "reported_income": total_income,
             "reported_expense": total_expense,
             "reported_balance": total_balance,
+            "expected_balance": total_prev + total_income - total_expense,
             "income_match": abs(total_all_income - total_income) < TOLERANCE,
             "expense_match": abs(total_all_expense - total_expense) < TOLERANCE,
             "balance_match": abs(total_balance - (total_prev + total_income - total_expense)) < TOLERANCE,
         },
         "active_accounts": len(active_sheets),
         "issues_count": len(issues),
+        "warnings": warnings,
+        "transfer_summary": transfer_summary,
+        "fx_loss": fx_loss,
         "sheets": active_sheets,
+    }
+
+
+# ---- Helper functions for cross-sheet reconciliation ----
+
+_SUSPECTED_CATEGORIES = {"投资收益", "投资款"}
+_TRANSFER_SUMMARY_PATTERNS = ["转入", "转出", "提回", "划转", "调拨", "提现到"]
+
+
+def _txn_is_suspected(t: dict) -> bool:
+    """Check if a transaction dict is suspected to be an internal transfer."""
+    category = (t.get("category") or "").strip()
+    summary = t.get("summary") or ""
+    income = t.get("income", 0)
+    expense = t.get("expense", 0)
+
+    if category in _SUSPECTED_CATEGORIES:
+        return True
+
+    if any(kw in summary for kw in _TRANSFER_SUMMARY_PATTERNS):
+        if income > 100 or expense > 100:
+            return True
+
+    return False
+
+
+def _find_amount_pairs(active_sheets: list[dict]) -> list[dict]:
+    """Find matching expense-income pairs across sheets by amount.
+
+    If neither side of a pair is marked as transfer, flag it as a warning.
+    """
+    # Collect expenses and incomes with sheet context
+    expenses = []  # (amount, sheet_name, txn_dict)
+    incomes = []   # (amount, sheet_name, txn_dict)
+
+    for s in active_sheets:
+        for t in s.get("transactions", []):
+            income = t.get("income", 0)
+            expense = t.get("expense", 0)
+            if expense > TOLERANCE:
+                expenses.append((round(expense, 2), s["sheet_name"], t))
+            if income > TOLERANCE:
+                incomes.append((round(income, 2), s["sheet_name"], t))
+
+    used_income = set()
+    warnings = []
+
+    for e_amt, e_sheet, e_txn in expenses:
+        for i_idx, (i_amt, i_sheet, i_txn) in enumerate(incomes):
+            if i_idx in used_income:
+                continue
+            if e_sheet == i_sheet:
+                continue
+            if abs(e_amt - i_amt) > TOLERANCE:
+                continue
+            # Found a match
+            used_income.add(i_idx)
+
+            # Only warn if neither side is already marked as transfer
+            if not e_txn.get("is_transfer") and not i_txn.get("is_transfer"):
+                warnings.append({
+                    "type": "unmarked_pair",
+                    "amount": e_amt,
+                    "expense": f"[{e_sheet}] [{e_txn.get('category', '')}] {e_txn.get('summary', '')}",
+                    "income": f"[{i_sheet}] [{i_txn.get('category', '')}] {i_txn.get('summary', '')}",
+                    "message": (
+                        f"跨sheet配对: {e_sheet}支出 {e_amt:.2f} "
+                        f"↔ {i_sheet}收入 {e_amt:.2f}，双方均未标记为往来"
+                    ),
+                })
+            break
+
+    return warnings
+
+
+def _build_fx_loss_pairs(active_sheets: list[dict]) -> dict:
+    """Build FX loss analysis from cross-sheet transfer pairs.
+
+    Matches transfer expenses to transfer incomes across sheets,
+    calculating the RMB difference caused by different exchange rates.
+
+    Returns:
+        {"total_loss": float, "has_loss": bool, "pairs": [FxLossPair, ...]}
+    """
+    expenses = []  # transfer expense entries with RMB context
+    incomes = []   # transfer income entries with RMB context
+
+    for s in active_sheets:
+        rate = s["exchange_rate"]
+        currency = s["currency"]
+        sheet_name = s["sheet_name"]
+        for t in s.get("transactions", []):
+            if not t.get("is_transfer"):
+                continue
+            expense_amt = t.get("expense", 0)
+            income_amt = t.get("income", 0)
+            if expense_amt > TOLERANCE:
+                expenses.append({
+                    "amount": expense_amt,
+                    "rmb": expense_amt * rate,
+                    "currency": currency,
+                    "rate": rate,
+                    "sheet": sheet_name,
+                    "summary": t.get("summary", ""),
+                })
+            if income_amt > TOLERANCE:
+                incomes.append({
+                    "amount": income_amt,
+                    "rmb": income_amt * rate,
+                    "currency": currency,
+                    "rate": rate,
+                    "sheet": sheet_name,
+                    "summary": t.get("summary", ""),
+                })
+
+    used = set()
+    pairs = []
+
+    for exp in expenses:
+        best_idx = None
+        best_diff = float("inf")
+
+        for i_idx, inc in enumerate(incomes):
+            if i_idx in used:
+                continue
+            if exp["sheet"] == inc["sheet"]:
+                continue
+
+            # Same currency → match by local amount
+            # Cross currency → match by RMB equivalent
+            if exp["currency"] == inc["currency"]:
+                diff = abs(exp["amount"] - inc["amount"])
+                tol = TOLERANCE
+            else:
+                diff = abs(exp["rmb"] - inc["rmb"])
+                tol = max(TOLERANCE, abs(exp["rmb"]) * 0.03)
+
+            if diff < tol and diff < best_diff:
+                best_diff = diff
+                best_idx = i_idx
+
+        if best_idx is not None:
+            used.add(best_idx)
+            inc = incomes[best_idx]
+            loss = round(inc["rmb"] - exp["rmb"], 2)
+            pairs.append({
+                "from_sheet": exp["sheet"],
+                "to_sheet": inc["sheet"],
+                "from_amount": exp["amount"],
+                "from_currency": exp["currency"],
+                "from_rate": exp["rate"],
+                "from_rmb": round(exp["rmb"], 2),
+                "to_amount": inc["amount"],
+                "to_currency": inc["currency"],
+                "to_rate": inc["rate"],
+                "to_rmb": round(inc["rmb"], 2),
+                "loss": loss,
+                "summary": exp["summary"] or inc["summary"] or "内部划转",
+            })
+
+    total_loss = round(sum(p["loss"] for p in pairs), 2)
+
+    return {
+        "total_loss": total_loss,
+        "has_loss": abs(total_loss) > 1.0,
+        "pairs": pairs,
     }
