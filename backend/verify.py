@@ -25,10 +25,47 @@ from parser import (
     safe_float,
     safe_str,
 )
-from classifier import is_transfer, TRANSFER_KEYWORDS, is_suspected_transfer, find_cross_sheet_pairs
+from classifier import is_transfer, TRANSFER_CATEGORIES as TRANSFER_KEYWORDS, is_suspected_transfer, find_cross_sheet_pairs
 from config import EXCEL_PASSWORD, SKIP_SHEETS, CURRENCY_MAP
 
 TOLERANCE = 0.5
+
+
+def _sumif_criteria_range(formula_str: str) -> str:
+    """Extract the criteria range string from a SUMIF formula.
+
+    Returns the first argument (criteria range) of =SUMIF(range, criteria, sum_range).
+    """
+    formula = str(formula_str or "")
+    if not formula.startswith("=SUMIF"):
+        return ""
+    inner = formula[len("=SUMIF("):]
+    if inner.endswith(")"):
+        inner = inner[:-1]
+    depth = 0
+    in_quote = False
+    for i, ch in enumerate(inner):
+        if ch == "'":
+            in_quote = not in_quote
+        elif ch == "(" and not in_quote:
+            depth += 1
+        elif ch == ")" and not in_quote:
+            depth -= 1
+        elif ch == "," and depth == 0 and not in_quote:
+            return inner[:i].strip()
+    return ""
+
+
+def _get_sumif_row_range(formula_str: str) -> tuple[int | None, int | None]:
+    """Extract row range from a SUMIF formula's criteria range.
+
+    Returns (start_row, end_row) or (None, None) for full-column references.
+    """
+    crit_range = _sumif_criteria_range(formula_str)
+    if not crit_range:
+        return None, None
+    _, start, end, _ = _parse_sheet_range(crit_range)
+    return start, end
 
 
 def _eval_sumif(wb: openpyxl.Workbook, formula: str, date: str) -> tuple[float, float]:
@@ -364,6 +401,8 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
             "expense_sheet": expense_ref[0] if expense_ref else None,
             "expense_col": expense_ref[1] if expense_ref else None,
             "is_cny": rate == 1.0,
+            "income_range": _get_sumif_row_range(income_formula),
+            "expense_range": _get_sumif_row_range(expense_formula),
         }
 
         # Also check for direct cell references
@@ -436,8 +475,17 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
     active_sheets = []
 
     for upper in upper_rows:
+        # Skip inactive accounts, but always include composite sub-accounts
+        # (those sharing a physical sheet with specific SUMIF row ranges)
         if upper["income_rmb"] < 0.01 and upper["expense_rmb"] < 0.01:
-            continue
+            is_composite_sub = False
+            if upper["lower_ref"] and upper["lower_ref"] in lower_rows:
+                lr = lower_rows[upper["lower_ref"]]
+                inc_range = lr.get("income_range", (None, None))
+                if inc_range[0] is not None:
+                    is_composite_sub = True
+            if not is_composite_sub:
+                continue
 
         lower = None
         sheet_name = None
@@ -520,7 +568,14 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         # Parse transactions for display and transfer classification
         if sheet_name in wb_data.sheetnames and sheet_name not in SKIP_SHEETS:
             ws = wb_data[sheet_name]
-            result = parse_sheet(ws, sheet_name)
+            # For composite accounts with specific row ranges, filter transactions
+            row_start = None
+            row_end = None
+            if lower:
+                inc_range = lower.get("income_range")
+                if inc_range and inc_range[0] is not None:
+                    row_start, row_end = inc_range
+            result = parse_sheet(ws, sheet_name, data_row_start=row_start, data_row_end=row_end)
             for txn in result.transactions:
                 if txn.date and txn.date != date:
                     continue

@@ -218,8 +218,13 @@ def _find_compound_total(ws, balance_col: int) -> float | None:
     return None
 
 
-def parse_sheet(ws, sheet_name: str) -> ParsedSheet:
-    """Parse a single detail sheet into standardized transactions."""
+def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: int = None) -> ParsedSheet:
+    """Parse a single detail sheet into standardized transactions.
+
+    Args:
+        data_row_start: Optional minimum row number (absolute) to include.
+        data_row_end: Optional maximum row number (absolute) to include.
+    """
     is_pp = is_pingpong_sheet(sheet_name)
     currency = extract_currency(sheet_name)
     account_type = classify_account_type(sheet_name)
@@ -240,6 +245,11 @@ def parse_sheet(ws, sheet_name: str) -> ParsedSheet:
     last_balance = 0.0
 
     for row in ws.iter_rows(min_row=data_start, values_only=False):
+        row_num = row[0].row
+        if data_row_start is not None and row_num < data_row_start:
+            continue
+        if data_row_end is not None and row_num > data_row_end:
+            break
         cells = {cell.column: cell.value for cell in row}
 
         date_val = cells.get(cols.get("date", 0))
