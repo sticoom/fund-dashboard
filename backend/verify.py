@@ -588,6 +588,12 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
                     "is_transfer": is_transfer(txn),
                 })
 
+        # For direct_ref accounts, compute transfers from transaction list
+        # (not available from SUMIF evaluation since they use direct cell references)
+        if upper["direct_ref"]:
+            transfer_local_income = sum(t["income"] for t in txns if t.get("is_transfer"))
+            transfer_local_expense = sum(t["expense"] for t in txns if t.get("is_transfer"))
+
         # Real income/expense (excluding transfers) from _eval_sumif
         real_local_income = calc_local_income - transfer_local_income
         real_local_expense = calc_local_expense - transfer_local_expense
