@@ -381,9 +381,7 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
         else:
             expense_local, expense_transfer = expense_local_cache, 0.0
 
-        # Expense column may have negative values (accounting convention) — use absolute value
-        expense_local = abs(expense_local)
-        expense_transfer = abs(expense_transfer)
+        # Expense column preserves sign (negative = refund/credit)
 
         info = {
             "name": name,
@@ -477,7 +475,7 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
     for upper in upper_rows:
         # Skip inactive accounts, but always include composite sub-accounts
         # (those sharing a physical sheet with specific SUMIF row ranges)
-        if upper["income_rmb"] < 0.01 and upper["expense_rmb"] < 0.01:
+        if abs(upper["income_rmb"]) < 0.01 and abs(upper["expense_rmb"]) < 0.01:
             is_composite_sub = False
             if upper["lower_ref"] and upper["lower_ref"] in lower_rows:
                 lr = lower_rows[upper["lower_ref"]]
@@ -555,13 +553,11 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
                 calc_local_expense, transfer_local_expense = _eval_sumif(wb_data, f_formula_upper, date)
             else:
                 calc_local_expense, transfer_local_expense = 0.0, 0.0
-            # Expense may be negative (accounting convention) — use absolute value
-            calc_local_expense = abs(calc_local_expense)
-            transfer_local_expense = abs(transfer_local_expense)
+            # Expense preserves sign (negative values = refunds/credits)
         elif upper["direct_ref"]:
             # Direct cell reference: use formula cache value
             calc_local_income = upper["income_rmb"]
-            calc_local_expense = abs(upper["expense_rmb"])
+            calc_local_expense = upper["expense_rmb"]
             transfer_local_income = 0.0
             transfer_local_expense = 0.0
 
@@ -604,7 +600,7 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
 
         # Verification
         income_ok = abs(calc_local_income - income_local_reported) < TOLERANCE
-        expense_ok = abs(calc_local_expense - abs(expense_local_reported)) < TOLERANCE
+        expense_ok = abs(calc_local_expense - expense_local_reported) < TOLERANCE
 
         # Balance check: prev + income - expense = balance
         expected_balance = upper["prev_rmb"] + upper["income_rmb"] - upper["expense_rmb"]

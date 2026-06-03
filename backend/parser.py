@@ -167,6 +167,8 @@ def _detect_columns(ws, header_row: int) -> dict[str, int]:
                 if "category" not in cols:
                     cols["category"] = cell.column
             elif val == "备注":
+                # Always update to the LAST "备注" column (L col > E col for pingpong)
+                cols["remark_last"] = cell.column
                 if "remark" not in cols:
                     cols["remark"] = cell.column
             elif val in ("收入", "入账"):
@@ -241,6 +243,12 @@ def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: i
         cols = _detect_columns(ws, header_row)
         data_start = header_row + 1
 
+    # For composite sheets (子公司公账-工商银行, 深圳主体对公美元户),
+    # the first header row lacks C=摘要. Sub-account sections below have
+    # their own headers with C=摘要. We re-detect columns on every header.
+    has_summary = "summary" in cols
+    remark_last_col = cols.get("remark_last", 0)
+
     transactions = []
     last_balance = 0.0
 
@@ -251,6 +259,18 @@ def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: i
         if data_row_end is not None and row_num > data_row_end:
             break
         cells = {cell.column: cell.value for cell in row}
+
+        # Detect sub-account header rows: a row containing literal "摘要" or "明细"
+        # as a cell value is a header, not data. Re-detect columns if needed.
+        row_text_vals = [str(cell.value or "").strip() for cell in row]
+        if "摘要" in row_text_vals or "明细" in row_text_vals:
+            if not has_summary or "摘要" == safe_str(cells.get(cols.get("summary", 0))):
+                new_cols = _detect_columns(ws, row_num)
+                if "summary" in new_cols:
+                    cols.update(new_cols)
+                    remark_last_col = cols.get("remark_last", 0)
+                    has_summary = True
+            continue  # Header row is not data
 
         date_val = cells.get(cols.get("date", 0))
         if date_val is None:
@@ -265,12 +285,17 @@ def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: i
 
         date_str = _format_date(date_val)
 
-        # For summary/category: use remark if available (pingpong), else category
         summary_col = cols.get("summary", cols.get("remark", 0))
         category_col = cols.get("category", cols.get("remark", 0))
 
         summary = safe_str(cells.get(summary_col))
         category = safe_str(cells.get(category_col))
+
+        # Pingpong layout: prefer L column (remark_last) for summary if it has data
+        if remark_last_col and is_pp:
+            l_val = safe_str(cells.get(remark_last_col))
+            if l_val:
+                summary = l_val
 
         # Build full row text for comprehensive transfer detection
         row_text_parts = []

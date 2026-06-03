@@ -177,7 +177,7 @@ function Summary() {
   const totalRealNet = s.real_net ?? 0;
 
   const realSheets = sheets.filter(
-    (sh) => sh.real_income_rmb > 0.01 || sh.real_expense_rmb > 0.01
+    (sh) => Math.abs(sh.real_income_rmb) > 0.01 || Math.abs(sh.real_expense_rmb) > 0.01
   );
   const realGrouped = Array.from(uniqueByName(realSheets));
   const totalIncomeRmb = realSheets.reduce((sum, sh) => sum + sh.real_income_rmb, 0);
@@ -366,7 +366,7 @@ function Summary() {
                           <span className="txn-count">({txnCount}笔)</span>
                         </td>
                         <td className="td-num">
-                          {incomeRmb > 0.01 ? (
+                          {Math.abs(incomeRmb) > 0.01 ? (
                             isCNY ? (
                               <span className="income">{fmtFull(incomeRmb)}</span>
                             ) : (
@@ -381,7 +381,7 @@ function Summary() {
                           )}
                         </td>
                         <td className="td-num">
-                          {expenseRmb > 0.01 ? (
+                          {Math.abs(expenseRmb) > 0.01 ? (
                             isCNY ? (
                               <span className="expense">{fmtFull(expenseRmb)}</span>
                             ) : (
@@ -421,12 +421,12 @@ function Summary() {
                                       <tr key={i}>
                                         <td>{sh.summary_name}</td>
                                         <td className="td-num">
-                                          {sh.reported_income > 0.01
+                                          {Math.abs(sh.reported_income) > 0.01
                                             ? fmtFull(sh.reported_income)
                                             : "-"}
                                         </td>
                                         <td className="td-num">
-                                          {sh.reported_expense > 0.01
+                                          {Math.abs(sh.reported_expense) > 0.01
                                             ? fmtFull(sh.reported_expense)
                                             : "-"}
                                         </td>
