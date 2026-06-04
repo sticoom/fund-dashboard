@@ -460,6 +460,36 @@
   font-style: italic;
 }
 
+/* ═══ Unmatched Transfers ═══ */
+.unmatched-header {
+  padding: 10px 12px !important;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  letter-spacing: 0.3px;
+}
+
+.s-row-unmatched td {
+  background: #fffefb;
+  font-size: 12px;
+}
+
+.s-row-unmatched:hover td {
+  background: #fef9ee;
+}
+
+.unmatched-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #b45309;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ═══ Status & Colors ═══ */
 .status-ok { color: var(--green); font-weight: 700; }
 .status-fail { color: var(--red); font-weight: 700; }

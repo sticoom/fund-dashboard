@@ -99,6 +99,15 @@ interface VerificationData {
       loss: number;
       summary: string;
     }[];
+    unmatched: {
+      sheet: string;
+      currency: string;
+      rate: number;
+      amount: number;
+      rmb: number;
+      summary: string;
+      direction: "income" | "expense";
+    }[];
   };
   sheets: SheetData[];
 }
@@ -682,6 +691,54 @@ function Summary() {
                         {fmtFull(pairs.reduce((s, p) => s + p.loss, 0))}
                       </td>
                     </tr>
+
+                    {/* Unmatched transfers */}
+                    {(fl?.unmatched ?? []).length > 0 && (
+                      <>
+                        <tr>
+                          <td colSpan={7} className="unmatched-header">
+                            未匹配往来（无对应收支方）
+                          </td>
+                        </tr>
+                        {(fl?.unmatched ?? []).map((u, idx) => (
+                          <tr key={`unmatched-${idx}`} className="s-row-unmatched">
+                            <td></td>
+                            <td>{u.sheet}</td>
+                            <td className={`td-num ${u.direction === "income" ? "income" : "expense"}`}>
+                              {u.direction === "income" ? (
+                                u.currency !== "CNY" ? (
+                                  <>
+                                    {fmtLocal(u.amount, u.currency)}{" "}
+                                    <span className="rate-calc">× {u.rate}</span>
+                                    {" = "}{fmtFull(u.rmb)}
+                                  </>
+                                ) : fmtFull(u.rmb)
+                              ) : (
+                                <span className="td-empty">-</span>
+                              )}
+                            </td>
+                            <td></td>
+                            <td className={`td-num ${u.direction === "expense" ? "expense" : "income"}`}>
+                              {u.direction === "expense" ? (
+                                u.currency !== "CNY" ? (
+                                  <>
+                                    {fmtLocal(u.amount, u.currency)}{" "}
+                                    <span className="rate-calc">× {u.rate}</span>
+                                    {" = "}{fmtFull(u.rmb)}
+                                  </>
+                                ) : fmtFull(u.rmb)
+                              ) : (
+                                <span className="td-empty">-</span>
+                              )}
+                            </td>
+                            <td>
+                              <span className="unmatched-tag">未匹配</span>
+                            </td>
+                            <td></td>
+                          </tr>
+                        ))}
+                      </>
+                    )}
                   </tbody>
                 </table>
               ) : (

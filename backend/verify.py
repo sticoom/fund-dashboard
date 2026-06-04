@@ -884,15 +884,16 @@ def _build_fx_loss_pairs(active_sheets: list[dict]) -> dict:
                     "summary": t.get("summary", ""),
                 })
 
-    used = set()
+    used_expense = set()
+    used_income = set()
     pairs = []
 
-    for exp in expenses:
+    for e_idx, exp in enumerate(expenses):
         best_idx = None
         best_diff = float("inf")
 
         for i_idx, inc in enumerate(incomes):
-            if i_idx in used:
+            if i_idx in used_income:
                 continue
             if exp["sheet"] == inc["sheet"]:
                 continue
@@ -911,7 +912,8 @@ def _build_fx_loss_pairs(active_sheets: list[dict]) -> dict:
                 best_idx = i_idx
 
         if best_idx is not None:
-            used.add(best_idx)
+            used_expense.add(e_idx)
+            used_income.add(best_idx)
             inc = incomes[best_idx]
             loss = round(inc["rmb"] - exp["rmb"], 2)
             pairs.append({
@@ -929,10 +931,36 @@ def _build_fx_loss_pairs(active_sheets: list[dict]) -> dict:
                 "summary": exp["summary"] or inc["summary"] or "内部划转",
             })
 
+    # Collect unmatched transfers
+    unmatched = []
+    for e_idx, exp in enumerate(expenses):
+        if e_idx not in used_expense:
+            unmatched.append({
+                "sheet": exp["sheet"],
+                "currency": exp["currency"],
+                "rate": exp["rate"],
+                "amount": exp["amount"],
+                "rmb": round(exp["rmb"], 2),
+                "summary": exp["summary"],
+                "direction": "expense",
+            })
+    for i_idx, inc in enumerate(incomes):
+        if i_idx not in used_income:
+            unmatched.append({
+                "sheet": inc["sheet"],
+                "currency": inc["currency"],
+                "rate": inc["rate"],
+                "amount": inc["amount"],
+                "rmb": round(inc["rmb"], 2),
+                "summary": inc["summary"],
+                "direction": "income",
+            })
+
     total_loss = round(sum(p["loss"] for p in pairs), 2)
 
     return {
         "total_loss": total_loss,
         "has_loss": abs(total_loss) > 1.0,
         "pairs": pairs,
+        "unmatched": unmatched,
     }
