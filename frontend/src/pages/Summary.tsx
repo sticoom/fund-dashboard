@@ -463,11 +463,13 @@ function Summary() {
                                         </td>
                                         <td>{t.category || "-"}</td>
                                         <td
-                                          className={`td-num ${t.income > 0 ? "income" : "expense"}`}
+                                          className={`td-num ${Math.abs(t.income) > Math.abs(t.expense) ? (t.income >= 0 ? "income" : "expense") : (t.expense <= 0 ? "income" : "expense")}`}
                                         >
-                                          {t.income > 0
-                                            ? `+${fmtLocal(t.income, currency)}`
-                                            : `-${fmtLocal(t.expense, currency)}`}
+                                          {Math.abs(t.income) > 0.01
+                                            ? `${t.income > 0 ? "+" : ""}${fmtLocal(t.income, currency)}`
+                                            : Math.abs(t.expense) > 0.01
+                                            ? `${t.expense > 0 ? "-" : "+"}${fmtLocal(Math.abs(t.expense), currency)}`
+                                            : "-"}
                                         </td>
                                       </tr>
                                     ))}
