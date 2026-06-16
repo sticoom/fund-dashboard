@@ -87,25 +87,25 @@
 - **实例 ID 容易记错**：用户口述的 `i-wz90ysqk7qpy6r3tdap7q` 实际是 `i-wz90ysqk7qpy6r3tdap7`（**少一个 q**）。验证方式：`aliyun ecs DescribeInstances --RegionId cn-shenzhen`
 - **验证日期**：2026-06-16
 
-### 11. ECS 上有两个 fund-dashboard 副本，部署目标必须选对
-- **症状**：ECS 上同时存在 `/opt/fund-dashboard` 和 `/root/fund-dashboard` 两份代码，往 `/root` 部署后页面不更新
-- **原因**：`/root/fund-dashboard` 是历史副本，**没有 `.git`**，`git pull` 拉不动；`/opt/fund-dashboard` 才是正式 clone（有 `.git`）
+### 11. ECS 部署目标必须选对（曾有两个副本，现已清理）
+- **历史症状**：ECS 上曾同时存在 `/opt/fund-dashboard` 和 `/root/fund-dashboard` 两份代码，往 `/root` 部署后页面不更新
+- **历史原因**：`/root/fund-dashboard` 是历史副本，**没有 `.git`**，`git pull` 拉不动；`/opt/fund-dashboard` 才是正式 clone（有 `.git`）
 - **正确部署目标**：`/opt/fund-dashboard`
-- **现状（2026-06-16 实证，两个目录至今仍同时存在）**：
+- **现状（2026-06-16 已清理）**：
 
-  | 路径 | 是否存在 | 是否有 .git | systemd 管吗 | 状态 |
-  |------|---------|-----------|------------|------|
-  | `/opt/fund-dashboard` | ✅ | ✅ | ✅ | **唯一活的部署** |
-  | `/root/fund-dashboard` | ✅ | ❌ | ❌ | 死代码（历史副本，部署无效） |
-- **判断方法（最权威）**：直接读 systemd 配置文件，看它指向哪：
+  | 路径 | 状态 |
+  |------|------|
+  | `/opt/fund-dashboard` | ✅ **唯一活的部署**（有 .git + systemd 管） |
+  | `/root/fund-dashboard` | ❌ 已删除（曾是无 .git 的历史副本） |
+  | `/root/fund-dashboard.zip` | ❌ 已删除（48 MB 早期 SCP 上传压缩包） |
+- **判断方法（最权威，避免被路径名迷惑）**：直接读 systemd 配置文件：
   ```bash
   grep -E 'ExecStart|WorkingDirectory' /etc/systemd/system/fund-dashboard.service
   # 应输出：
   # WorkingDirectory=/opt/fund-dashboard/backend
   # ExecStart=/usr/bin/python3.11 /opt/fund-dashboard/backend/server.py --prod
   ```
-  systemd 指向 `/opt` 就一定是 `/opt`，不要被 `/root` 那个目录迷惑。
-- **验证日期**：2026-06-16（再次实证两个目录仍共存）
+- **验证日期**：2026-06-16（清理后再次确认只剩 /opt）
 
 ### 12. ECS 部署连接信息与 Python 环境固化
 - **连接信息**：
@@ -116,9 +116,9 @@
   - 项目路径：`/opt/fund-dashboard`
 - **Python 环境（⚠️ 2026-06-16 实证修正）**：
   - systemd service 实际用的是 **`/usr/bin/python3.11`**（系统级 py3.11，已 pip install 所有依赖，fastapi 0.136.1）
-  - `/opt/miniconda3/envs/fund/bin/python`（py3.12）虽然存在但是**历史遗留备份**，当前 service 不使用它
   - 直接 `python server.py` 会拿到系统 Python 3.6 跑不起来——所以**不要手动启动**，让 `systemctl restart fund-dashboard` 自动用 py3.11 启
   - 验证：`grep ExecStart /etc/systemd/system/fund-dashboard.service`
+  - 历史遗留的 `/opt/miniconda3`（1.3 GB，py3.12）已于 2026-06-16 删除——确认无 systemd/cron 引用后才动手
 - **部署 SOP（✅ 已修正为 systemctl，与 #10 一致）**：
   ```bash
   # 本地 push
@@ -166,6 +166,16 @@
   - `InvocationStatus=Success`
   - Output 末尾含 `DEPLOY_OK`
 - **额外验证**：`curl http://120.25.100.51:8000/` 返回 200 + bundle hash 与本地 `npm run build` 输出一致（如 `index-BYvqHHyR.js`）
+- **验证日期**：2026-06-16
+
+### 14. aliyun CLI 远程命令：bash `&&` 链短路导致后半段不执行
+- **症状**：发了一条 `ls file && rm -rf dir && echo done` 命令，`ls` 失败后 `rm` 没跑，但末尾的 `echo '(confirmed)'` 触发了 `||` 分支，让人误以为 `rm` 成功了
+- **原因**：bash 中 `A && B && C || D && E` 的优先级——`||` 比 `&&` 低，整个左半边 `&&` 链作为一个整体失败后跳到 `||` 后；中间的所有命令都被跳过
+- **解决**：
+  - **检查类命令**和**破坏性类命令**不要混在一条 `&&` 链里，分开多次 RunCommand 调用
+  - 必须串行时用 `;` 分隔（每条都跑，不管前一条结果）
+  - 验证删除是否生效：用 `du -sh /path` 或 `ls /path` 独立命令，**不要**靠链尾的 echo 推断
+- **实证案例**：本次清理 `/opt/miniconda3` 时第一次 `ls verify.py.bak && ... && rm -rf /opt/miniconda3 && ...` 短路了，miniconda 实际没被删，但 `(confirmed: no miniconda in /opt)` 误导了判断；改用 `;` 分隔后才真删成功
 - **验证日期**：2026-06-16
 
 ---
