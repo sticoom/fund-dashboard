@@ -220,6 +220,12 @@ function Summary() {
     ? (ts?.diff_rmb ?? 0) - fxTotalLoss - cat.unmatched_net_rmb
     : 0;
 
+  // Unmatched entries: when net=0 they are "external account" pairs (effectively balanced),
+  // show them inside 已配平 section with grey font. Only entries with net≠0 stay in 真正未匹配.
+  const externalEntries =
+    cat && cat.unmatched_net_rmb === 0 ? cat.unmatched : [];
+  const gapEntries = cat && cat.unmatched_net_rmb !== 0 ? cat.unmatched : [];
+
   return (
     <div className="summary-page">
       {/* ═══ Header ═══ */}
@@ -555,7 +561,7 @@ function Summary() {
                   <div className="explanation-line ok">
                     ✓ 全部往来已解释 · 差额 {fmtFull(ts!.diff_rmb ?? 0)} ={" "}
                     汇损 {fmtFull(fxTotalLoss)}
-                    {cat.unmatched_net_rmb !== 0 && (
+                    {gapEntries.length > 0 && (
                       <> + 未匹配净额 {fmtFull(cat.unmatched_net_rmb)}</>
                     )}
                   </div>
@@ -590,54 +596,101 @@ function Summary() {
                       <span className="cat-icon">🟢</span>
                       <span className="cat-title">已配平</span>
                       <span className="cat-meta">
-                        {cat.balanced_pairs.length} 笔 · ¥0 损耗
+                        {cat.balanced_pairs.length} 笔配平
+                        {externalEntries.length > 0 &&
+                          ` · ${externalEntries.length} 笔外部账户`}
+                        {" · ¥0 损耗"}
                       </span>
                       <span className="cat-chevron">
                         {cat1Open ? "▾" : "▸"}
                       </span>
                     </div>
                     {cat1Open &&
-                      (cat.balanced_pairs.length > 0 ? (
-                        <table className="s-table cat-table">
-                          <thead>
-                            <tr>
-                              <th>收入方</th>
-                              <th className="th-num">收入金额</th>
-                              <th>支出方</th>
-                              <th className="th-num">支出金额</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {cat.balanced_pairs.map((pair, idx) => (
-                              <tr key={idx} className="s-row-static">
-                                <td>{pair.to_sheet}</td>
-                                <td className="td-num">
-                                  {pair.to_currency !== "CNY" ? (
-                                    <>
-                                      {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
-                                      <span className="rate-calc">× {pair.to_rate}</span>
-                                      {" = "}{fmtFull(pair.to_rmb)}
-                                    </>
-                                  ) : (
-                                    fmtFull(pair.to_rmb)
-                                  )}
-                                </td>
-                                <td>{pair.from_sheet}</td>
-                                <td className="td-num">
-                                  {pair.from_currency !== "CNY" ? (
-                                    <>
-                                      {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
-                                      <span className="rate-calc">× {pair.from_rate}</span>
-                                      {" = "}{fmtFull(pair.from_rmb)}
-                                    </>
-                                  ) : (
-                                    fmtFull(pair.from_rmb)
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      (cat.balanced_pairs.length > 0 || externalEntries.length > 0 ? (
+                        <>
+                          {cat.balanced_pairs.length > 0 && (
+                            <table className="s-table cat-table">
+                              <thead>
+                                <tr>
+                                  <th>收入方</th>
+                                  <th className="th-num">收入金额</th>
+                                  <th>支出方</th>
+                                  <th className="th-num">支出金额</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cat.balanced_pairs.map((pair, idx) => (
+                                  <tr key={idx} className="s-row-static">
+                                    <td>{pair.to_sheet}</td>
+                                    <td className="td-num">
+                                      {pair.to_currency !== "CNY" ? (
+                                        <>
+                                          {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
+                                          <span className="rate-calc">× {pair.to_rate}</span>
+                                          {" = "}{fmtFull(pair.to_rmb)}
+                                        </>
+                                      ) : (
+                                        fmtFull(pair.to_rmb)
+                                      )}
+                                    </td>
+                                    <td>{pair.from_sheet}</td>
+                                    <td className="td-num">
+                                      {pair.from_currency !== "CNY" ? (
+                                        <>
+                                          {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
+                                          <span className="rate-calc">× {pair.from_rate}</span>
+                                          {" = "}{fmtFull(pair.from_rmb)}
+                                        </>
+                                      ) : (
+                                        fmtFull(pair.from_rmb)
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+
+                          {/* External-account entries (counterpart not in this report) — normal business, grey */}
+                          {externalEntries.length > 0 && (
+                            <div className="external-block">
+                              <div className="external-block-title">
+                                外部账户往来 · 正常业务（对方账户不在本表内，自动配平）
+                              </div>
+                              <table className="s-table external-table">
+                                <thead>
+                                  <tr>
+                                    <th>方向</th>
+                                    <th>账户</th>
+                                    <th>摘要</th>
+                                    <th className="th-num">原币金额</th>
+                                    <th className="th-num">RMB 金额</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {externalEntries.map((u, idx) => (
+                                    <tr key={idx} className="external-row">
+                                      <td className={u.direction === "income" ? "income" : "expense"}>
+                                        {u.direction === "income" ? "收入" : "支出"}
+                                      </td>
+                                      <td>{u.sheet}</td>
+                                      <td className="td-summary">{u.summary || "-"}</td>
+                                      <td className="td-num">
+                                        {u.currency !== "CNY"
+                                          ? fmtLocal(u.amount, u.currency)
+                                          : fmtFull(u.amount)}
+                                      </td>
+                                      <td className={`td-num ${u.direction === "income" ? "income" : "expense"}`}>
+                                        {u.direction === "income" ? "+" : "-"}
+                                        {fmtFull(u.rmb)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <div className="no-data">无已配平往来</div>
                       ))}
@@ -785,74 +838,74 @@ function Summary() {
                       ))}
                   </div>
 
-                  {/* ─── Section 3: 真正未匹配 ─── */}
-                  <div
-                    className={`cat-section cat-unmatched ${cat.unmatched_net_rmb === 0 ? "zero" : "warn"} ${cat3Open ? "expanded" : "collapsed"}`}
-                  >
+                  {/* ─── Section 3: 真正未匹配 — only shown when net≠0 (real data gap) ─── */}
+                  {gapEntries.length > 0 && (
                     <div
-                      className="cat-section-header"
-                      onClick={() => setCat3Open(!cat3Open)}
+                      className={`cat-section cat-unmatched warn ${cat3Open ? "expanded" : "collapsed"}`}
                     >
-                      <span className="cat-icon">🔴</span>
-                      <span className="cat-title">真正未匹配</span>
-                      <span className="cat-meta">
-                        {cat.unmatched.length} 笔 · 净额{" "}
-                        {fmtFull(cat.unmatched_net_rmb)}
-                      </span>
-                      <span className="cat-chevron">
-                        {cat3Open ? "▾" : "▸"}
-                      </span>
-                    </div>
-                    {cat3Open &&
-                      (cat.unmatched.length > 0 ? (
-                        <>
-                          <table className="s-table cat-table">
-                            <thead>
-                              <tr>
-                                <th>方向</th>
-                                <th>账户</th>
-                                <th>摘要</th>
-                                <th className="th-num">原币金额</th>
-                                <th className="th-num">RMB 金额</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {cat.unmatched.map((u, idx) => (
-                                <tr key={idx} className="s-row-static">
-                                  <td
-                                    className={u.direction === "income" ? "income" : "expense"}
-                                  >
-                                    <strong>
-                                      {u.direction === "income" ? "收入" : "支出"}
-                                    </strong>
-                                  </td>
-                                  <td>{u.sheet}</td>
-                                  <td className="td-summary">{u.summary || "-"}</td>
-                                  <td className="td-num">
-                                    {u.currency !== "CNY"
-                                      ? fmtLocal(u.amount, u.currency)
-                                      : fmtFull(u.amount)}
-                                  </td>
-                                  <td
-                                    className={`td-num ${u.direction === "income" ? "income" : "expense"}`}
-                                  >
-                                    {u.direction === "income" ? "+" : "-"}
-                                    {fmtFull(u.rmb)}
-                                  </td>
+                      <div
+                        className="cat-section-header"
+                        onClick={() => setCat3Open(!cat3Open)}
+                      >
+                        <span className="cat-icon">🔴</span>
+                        <span className="cat-title">真正未匹配</span>
+                        <span className="cat-meta">
+                          {gapEntries.length} 笔 · 净额{" "}
+                          {fmtFull(cat.unmatched_net_rmb)}
+                        </span>
+                        <span className="cat-chevron">
+                          {cat3Open ? "▾" : "▸"}
+                        </span>
+                      </div>
+                      {cat3Open &&
+                        (gapEntries.length > 0 ? (
+                          <>
+                            <table className="s-table cat-table">
+                              <thead>
+                                <tr>
+                                  <th>方向</th>
+                                  <th>账户</th>
+                                  <th>摘要</th>
+                                  <th className="th-num">原币金额</th>
+                                  <th className="th-num">RMB 金额</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          <div className="cat-hint">
-                            {cat.unmatched_net_rmb === 0
-                              ? `净额 ¥0.00 — 通常因对方账户不在本表内（如子公司招行户）`
-                              : `⚠ 净额 ${fmtFull(cat.unmatched_net_rmb)} 无法解释，可能存在数据缺失`}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="no-data">无未匹配往来</div>
-                      ))}
-                  </div>
+                              </thead>
+                              <tbody>
+                                {gapEntries.map((u, idx) => (
+                                  <tr key={idx} className="s-row-static">
+                                    <td
+                                      className={u.direction === "income" ? "income" : "expense"}
+                                    >
+                                      <strong>
+                                        {u.direction === "income" ? "收入" : "支出"}
+                                      </strong>
+                                    </td>
+                                    <td>{u.sheet}</td>
+                                    <td className="td-summary">{u.summary || "-"}</td>
+                                    <td className="td-num">
+                                      {u.currency !== "CNY"
+                                        ? fmtLocal(u.amount, u.currency)
+                                        : fmtFull(u.amount)}
+                                    </td>
+                                    <td
+                                      className={`td-num ${u.direction === "income" ? "income" : "expense"}`}
+                                    >
+                                      {u.direction === "income" ? "+" : "-"}
+                                      {fmtFull(u.rmb)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="cat-hint">
+                              ⚠ 净额 {fmtFull(cat.unmatched_net_rmb)} 无法解释，可能存在数据缺失
+                            </div>
+                          </>
+                        ) : (
+                          <div className="no-data">无未匹配往来</div>
+                        ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="no-data">暂无分类数据，请重新上传文件</div>

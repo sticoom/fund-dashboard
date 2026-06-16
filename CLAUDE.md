@@ -215,6 +215,73 @@ docker run -e EXCEL_PASSWORD=xxx -p 8000:8000 fund-dashboard
 - **解决**：泛化往来检测——如果公式层面的往来金额为 0，检查交易列表是否有标记为往来的交易，如有则从交易列表计算。覆盖所有非 SUMIF 公式场景
 - **验证日期**：2026-05-28
 
+### 10. ECS 实际部署是 systemd 管的，不是裸 nohup（杀进程会"打地鼠"）
+- **症状**：SSH 上 ECS 后 `kill -9 <pid>` 杀掉 server 进程，几秒后端口又被**新 pid** 占用；反复 kill 反复重生
+- **原因**：服务器上配置了 `fund-dashboard.service`（systemd），`Restart=always` 自动拉起。**所有"杀进程"操作无效**
+- **正确做法**：
+  - 重启：`systemctl restart fund-dashboard`
+  - 状态：`systemctl status fund-dashboard`
+  - 日志：`journalctl -u fund-dashboard -n 50 --no-pager`（不是 server.log）
+- **完整部署流程**：
+  ```bash
+  cd /opt/fund-dashboard && git pull origin main
+  cd frontend && npm run build && cd ..
+  systemctl restart fund-dashboard
+  ```
+- **本地无 SSH 时可用阿里云 CLI 远程执行**（无需密码）：
+  ```bash
+  aliyun ecs RunCommand \
+    --RegionId cn-shenzhen \
+    --InstanceId.1 i-wz90ysqk7qpy6r3tdap7 \
+    --Type RunShellScript \
+    --CommandContent "systemctl restart fund-dashboard"
+  # 查结果：
+  aliyun ecs DescribeInvocationResults --RegionId cn-shenzhen --InvokeId <返回的InvokeId>
+  ```
+- **实例 ID 容易记错**：用户口述的 `i-wz90ysqk7qpy6r3tdap7q` 实际是 `i-wz90ysqk7qpy6r3tdap7`（**少一个 q**）。验证方式：`aliyun ecs DescribeInstances --RegionId cn-shenzhen`
+- **验证日期**：2026-06-16
+
+### 10. ECS 上有两个 fund-dashboard 副本，部署目标必须选对
+- **症状**：ECS 上同时存在 `/opt/fund-dashboard` 和 `/root/fund-dashboard` 两份代码，往 `/root` 部署后页面不更新
+- **原因**：`/root/fund-dashboard` 是历史副本，**没有 `.git`**，`git pull` 拉不动；`/opt/fund-dashboard` 才是正式 clone（有 `.git`）
+- **正确部署目标**：`/opt/fund-dashboard`
+- **验证命令**：`ls -la /opt/fund-dashboard/.git` 应该存在；`ls -la /root/fund-dashboard/.git` 应该不存在
+- **验证日期**：2026-06-16
+
+### 11. ECS 部署连接信息与 Python 环境固化
+- **连接信息**：
+  - 实例 ID：`i-wz90ysqk7qpy6r3tdap7`（注意：用户首次口述时多念了一个 q，正确是 7q 结尾）
+  - 公网 IP：`120.25.100.51`
+  - SSH：`ssh root@120.25.100.51`
+  - 密码：`470320936@Zeng`
+  - 项目路径：`/opt/fund-dashboard`
+- **Python 环境（关键）**：ECS 系统默认 Python 3.6 跑不起来，必须用 conda 环境：
+  ```bash
+  /opt/miniconda3/envs/fund/bin/python /opt/fund-dashboard/backend/server.py --prod
+  ```
+  或者先 `conda activate fund` 再 `python server.py --prod`
+- **部署 SOP**：
+  ```bash
+  # 本地 push
+  cd C:/Users/13676/Desktop/fund-dashboard
+  git add -A && git commit -m "<feat/fix>: xxx" && git push origin main
+
+  # ECS 拉取 + 重建 + 重启
+  ssh root@120.25.100.51
+  cd /opt/fund-dashboard
+  git pull origin main
+  cd frontend && npm run build && cd ..
+  pkill -f "server.py" || fuser -k 8000/tcp
+  nohup EXCEL_PASSWORD=xxx /opt/miniconda3/envs/fund/bin/python backend/server.py --prod > server.log 2>&1 &
+
+  # 部署后必检
+  curl http://120.25.100.51:8000/                                        # 应返回 200
+  ls -la /opt/fund-dashboard/public/data/verification.json               # 时间戳应已更新
+  ```
+- **GitHub 仓库**：`https://github.com/sticoom/fund-dashboard`（本地与云端已打通，push 即可触发后续 ECS 拉取）
+- **安全建议**：密码硬编码长期不安全，建议后续用 `ssh-copy-id root@120.25.100.51` 配置免密或把密码移到 `~/.env.fund-dashboard`
+- **验证日期**：2026-06-16
+
 ## 待人工确认项
 
 > 以下基于 2026-05-13 的单个 Excel 样本，部分边界场景需后续验证。

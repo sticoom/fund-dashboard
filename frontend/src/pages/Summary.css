@@ -266,6 +266,40 @@
   font-style: italic;
 }
 
+/* ═══ External-account entries (rendered inside 已配平 section, grey) ═══ */
+.external-block {
+  border-top: 1px dashed var(--border);
+  padding: 10px 14px 12px;
+  background: var(--gray-light);
+}
+
+.external-block-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-bottom: 6px;
+  opacity: 0.85;
+}
+
+.external-table {
+  margin: 0;
+  opacity: 0.6;
+}
+
+.external-table thead th {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.external-row td {
+  color: var(--text-secondary) !important;
+}
+
+.external-row td.income,
+.external-row td.expense {
+  opacity: 0.7;
+}
+
 /* ═══ Banner Level 1 (clickable header) ═══ */
 .banner-l1 {
   cursor: pointer;
