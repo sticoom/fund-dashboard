@@ -731,6 +731,34 @@ def verify(filepath: str, original_filename: str | None = None) -> dict:
     # ---- FX loss analysis ----
     fx_loss = _build_fx_loss_pairs(active_sheets)
 
+    # ---- Three-category view (lightweight packaging of fx_loss for UI) ----
+    # balanced:     pairs with no FX loss
+    # fx_loss:      pairs with cross-currency FX loss (explainable business cost)
+    # unmatched:    transfer txns that found no counterpart in any sheet (data gap)
+    fx_pairs = fx_loss["pairs"]
+    fx_unmatched = fx_loss.get("unmatched", [])
+
+    balanced_pairs = [p for p in fx_pairs if abs(p["loss"]) < 0.01]
+    fx_loss_pairs = [p for p in fx_pairs if abs(p["loss"]) >= 0.01]
+
+    unmatched_net_rmb = round(
+        sum(
+            u["rmb"] * (1 if u["direction"] == "income" else -1)
+            for u in fx_unmatched
+        ),
+        2,
+    )
+    # diff_rmb should equal fx_loss + unmatched_net if everything is explained
+    explained = abs(transfer_diff_rmb - fx_loss["total_loss"] - unmatched_net_rmb) < 1.0
+
+    transfer_summary["categorized"] = {
+        "balanced_pairs": balanced_pairs,
+        "fx_loss_pairs": fx_loss_pairs,
+        "unmatched": fx_unmatched,
+        "unmatched_net_rmb": unmatched_net_rmb,
+        "explained": explained,
+    }
+
     return {
         "date": date,
         "filename": Path(filepath).name,

@@ -42,6 +42,31 @@ interface SheetData {
   transactions: Transaction[];
 }
 
+interface FxPair {
+  from_sheet: string;
+  to_sheet: string;
+  from_amount: number;
+  from_currency: string;
+  from_rate: number;
+  from_rmb: number;
+  to_amount: number;
+  to_currency: string;
+  to_rate: number;
+  to_rmb: number;
+  loss: number;
+  summary: string;
+}
+
+interface UnmatchedEntry {
+  direction: "income" | "expense";
+  sheet: string;
+  currency: string;
+  rate: number;
+  amount: number;
+  rmb: number;
+  summary: string;
+}
+
 interface VerificationData {
   date: string;
   filename: string;
@@ -81,33 +106,19 @@ interface VerificationData {
       net_rmb: number;
       transactions: Transaction[];
     }[];
+    categorized?: {
+      balanced_pairs: FxPair[];
+      fx_loss_pairs: FxPair[];
+      unmatched: UnmatchedEntry[];
+      unmatched_net_rmb: number;
+      explained: boolean;
+    };
   };
   fx_loss?: {
     total_loss: number;
     has_loss: boolean;
-    pairs: {
-      from_sheet: string;
-      to_sheet: string;
-      from_amount: number;
-      from_currency: string;
-      from_rate: number;
-      from_rmb: number;
-      to_amount: number;
-      to_currency: string;
-      to_rate: number;
-      to_rmb: number;
-      loss: number;
-      summary: string;
-    }[];
-    unmatched: {
-      sheet: string;
-      currency: string;
-      rate: number;
-      amount: number;
-      rmb: number;
-      summary: string;
-      direction: "income" | "expense";
-    }[];
+    pairs: FxPair[];
+    unmatched: UnmatchedEntry[];
   };
   sheets: SheetData[];
 }
@@ -159,7 +170,12 @@ function Summary() {
   const [banner1Open, setBanner1Open] = useState(false);
   const [banner2Open, setBanner2Open] = useState(false);
 
-  // Level 3: row expand
+  // Level 3: three category sections (all collapsed by default)
+  const [cat1Open, setCat1Open] = useState(false); // 已配平
+  const [cat2Open, setCat2Open] = useState(false); // 已识别业务损耗
+  const [cat3Open, setCat3Open] = useState(false); // 真正未匹配
+
+  // Level 4: row expand
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [expandedPair, setExpandedPair] = useState<number | null>(null);
 
@@ -196,7 +212,13 @@ function Summary() {
   const hasTransfer = !!(
     ts && (ts.total_income_rmb > 0.01 || ts.total_expense_rmb > 0.01)
   );
-  const pairs = fl?.pairs ?? [];
+
+  // Three-category view (from backend categorized field)
+  const cat = ts?.categorized;
+  const fxTotalLoss = fl?.total_loss ?? 0;
+  const residual = cat
+    ? (ts?.diff_rmb ?? 0) - fxTotalLoss - cat.unmatched_net_rmb
+    : 0;
 
   return (
     <div className="summary-page">
@@ -511,240 +533,329 @@ function Summary() {
       {/* ═══ BANNER 2: 往来 ═══ */}
       {hasTransfer && (
         <div
-          className={`banner banner-transfer ${ts!.balanced ? "balanced" : "unbalanced"}`}
+          className={`banner banner-transfer ${cat?.explained ? "balanced" : "unbalanced"}`}
         >
-          {/* Level 1: clickable header with totals */}
+          {/* Level 1: clickable header with explanation line */}
           <div
             className="banner-l1"
-            onClick={
-              pairs.length > 0
-                ? () => setBanner2Open(!banner2Open)
-                : undefined
-            }
-            style={{
-              cursor: pairs.length > 0 ? "pointer" : "default",
-            }}
+            onClick={() => setBanner2Open(!banner2Open)}
           >
             <div className="banner-title-row">
               <div className="banner-title-bar">
                 <span className="banner-label">往来</span>
                 <span className="banner-sub">内部转账</span>
               </div>
-              {pairs.length > 0 && (
-                <span className="banner-chevron">
-                  {banner2Open ? "▾" : "▸"}
-                </span>
+              <span className="banner-chevron">
+                {banner2Open ? "▾" : "▸"}
+              </span>
+            </div>
+            <div className="explanation-line-container">
+              {cat ? (
+                cat.explained ? (
+                  <div className="explanation-line ok">
+                    ✓ 全部往来已解释 · 差额 {fmtFull(ts!.diff_rmb ?? 0)} ={" "}
+                    汇损 {fmtFull(fxTotalLoss)}
+                    {cat.unmatched_net_rmb !== 0 && (
+                      <> + 未匹配净额 {fmtFull(cat.unmatched_net_rmb)}</>
+                    )}
+                  </div>
+                ) : (
+                  <div className="explanation-line warn">
+                    ⚠ 差额 {fmtFull(ts!.diff_rmb ?? 0)} − 汇损 {fmtFull(fxTotalLoss)} −{" "}
+                    未匹配 {fmtFull(cat.unmatched_net_rmb)} ={" "}
+                    {fmtFull(residual)} 未解释
+                  </div>
+                )
+              ) : (
+                <div className="explanation-line warn">
+                  ⚠ 差额 {fmtFull(ts!.diff_rmb ?? 0)}
+                </div>
               )}
             </div>
-            <div className="banner-totals">
-              <div className="banner-total-item">
-                <span className="bt-label">往来总收入</span>
-                <span className="bt-value income">
-                  {fmtFull(ts!.total_income_rmb ?? 0)}
-                </span>
-              </div>
-              <div className="banner-divider" />
-              <div className="banner-total-item">
-                <span className="bt-label">往来总支出</span>
-                <span className="bt-value expense">
-                  {fmtFull(ts!.total_expense_rmb ?? 0)}
-                </span>
-              </div>
-              <div className="banner-divider" />
-              <div className="banner-total-item">
-                <span className="bt-label">差额</span>
-                <span className={`bt-value ${ts!.balanced ? "" : "warn"}`}>
-                  {fmtFull(ts!.diff_rmb ?? 0)}
-                </span>
-              </div>
-            </div>
-            {fl?.has_loss && (
-              <div className="fx-hint">⚠ 差额由跨币种汇损解释</div>
-            )}
           </div>
 
-          {/* Level 2: Match table */}
+          {/* Level 2: three vertical category sections */}
           {banner2Open && (
             <div className="banner-l2">
-              {pairs.length > 0 ? (
-                <table className="s-table">
-                  <thead>
-                    <tr>
-                      <th className="th-arrow"></th>
-                      <th>往来收入方</th>
-                      <th className="th-num">收入金额</th>
-                      <th>往来支出方</th>
-                      <th className="th-num">支出金额</th>
-                      <th>匹配</th>
-                      <th className="th-num">汇损</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pairs.map((pair, idx) => {
-                      const isCross =
-                        pair.from_currency !== pair.to_currency;
-                      const hasFxLoss = Math.abs(pair.loss) > 0.01;
-                      const isExpanded = expandedPair === idx;
-
-                      return (
-                        <Fragment key={idx}>
-                          <tr
-                            className={`${hasFxLoss ? "s-row-clickable" : "s-row-static"} ${hasFxLoss ? "s-row-fx" : ""} ${isExpanded ? "s-row-active" : ""}`}
-                            onClick={() =>
-                              hasFxLoss &&
-                              setExpandedPair(isExpanded ? null : idx)
-                            }
-                          >
-                            <td className="td-arrow">
-                              {hasFxLoss
-                                ? isExpanded
-                                  ? "▾"
-                                  : "▸"
-                                : ""}
-                            </td>
-                            <td>{pair.to_sheet}</td>
-                            <td className="td-num">
-                              {pair.to_currency !== "CNY" ? (
-                                <>
-                                  {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
-                                  <span className="rate-calc">× {pair.to_rate}</span>
-                                  {" = "}{fmtFull(pair.to_rmb)}
-                                </>
-                              ) : (
-                                fmtFull(pair.to_rmb)
-                              )}
-                            </td>
-                            <td>{pair.from_sheet}</td>
-                            <td className="td-num">
-                              {pair.from_currency !== "CNY" ? (
-                                <>
-                                  {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
-                                  <span className="rate-calc">× {pair.from_rate}</span>
-                                  {" = "}{fmtFull(pair.from_rmb)}
-                                </>
-                              ) : (
-                                fmtFull(pair.from_rmb)
-                              )}
-                            </td>
-                            <td>
-                              {isCross ? (
-                                <span className="fx-tag">跨币种</span>
-                              ) : (
-                                <span className="match-ok">✓ 无汇损</span>
-                              )}
-                            </td>
-                            <td className={`td-num ${hasFxLoss ? "expense" : ""}`}>
-                              {hasFxLoss ? fmtFull(pair.loss) : "-"}
-                            </td>
-                          </tr>
-
-                          {/* Level 3: FX loss calculation */}
-                          {isExpanded && hasFxLoss && (
-                            <tr className="s-row-detail">
-                              <td colSpan={7}>
-                                <div className="detail-panel fx-detail">
-                                  <div className="fx-calc-line">
-                                    <span className="fx-label">支出方RMB</span>
-                                    <span>
-                                      {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
-                                      × {pair.from_rate} ={" "}
-                                      <strong>{fmtFull(pair.from_rmb)}</strong>
-                                    </span>
-                                  </div>
-                                  <div className="fx-calc-line">
-                                    <span className="fx-label">收入方RMB</span>
-                                    <span>
+              {cat ? (
+                <>
+                  {/* ─── Section 1: 已配平 ─── */}
+                  <div
+                    className={`cat-section cat-balanced ${cat1Open ? "expanded" : "collapsed"}`}
+                  >
+                    <div
+                      className="cat-section-header"
+                      onClick={() => setCat1Open(!cat1Open)}
+                    >
+                      <span className="cat-icon">🟢</span>
+                      <span className="cat-title">已配平</span>
+                      <span className="cat-meta">
+                        {cat.balanced_pairs.length} 笔 · ¥0 损耗
+                      </span>
+                      <span className="cat-chevron">
+                        {cat1Open ? "▾" : "▸"}
+                      </span>
+                    </div>
+                    {cat1Open &&
+                      (cat.balanced_pairs.length > 0 ? (
+                        <table className="s-table cat-table">
+                          <thead>
+                            <tr>
+                              <th>收入方</th>
+                              <th className="th-num">收入金额</th>
+                              <th>支出方</th>
+                              <th className="th-num">支出金额</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cat.balanced_pairs.map((pair, idx) => (
+                              <tr key={idx} className="s-row-static">
+                                <td>{pair.to_sheet}</td>
+                                <td className="td-num">
+                                  {pair.to_currency !== "CNY" ? (
+                                    <>
                                       {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
-                                      × {pair.to_rate} ={" "}
-                                      <strong>{fmtFull(pair.to_rmb)}</strong>
-                                    </span>
-                                  </div>
-                                  <div className="fx-calc-line fx-calc-result">
-                                    <span className="fx-label">汇损</span>
-                                    <span>
-                                      {fmtFull(pair.to_rmb)} −{" "}
-                                      {fmtFull(pair.from_rmb)} ={" "}
-                                      <strong className="expense">
-                                        {fmtFull(pair.loss)}
-                                      </strong>
-                                    </span>
-                                  </div>
-                                </div>
+                                      <span className="rate-calc">× {pair.to_rate}</span>
+                                      {" = "}{fmtFull(pair.to_rmb)}
+                                    </>
+                                  ) : (
+                                    fmtFull(pair.to_rmb)
+                                  )}
+                                </td>
+                                <td>{pair.from_sheet}</td>
+                                <td className="td-num">
+                                  {pair.from_currency !== "CNY" ? (
+                                    <>
+                                      {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
+                                      <span className="rate-calc">× {pair.from_rate}</span>
+                                      {" = "}{fmtFull(pair.from_rmb)}
+                                    </>
+                                  ) : (
+                                    fmtFull(pair.from_rmb)
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="no-data">无已配平往来</div>
+                      ))}
+                  </div>
+
+                  {/* ─── Section 2: 已识别业务损耗 ─── */}
+                  <div
+                    className={`cat-section cat-fx-loss ${cat2Open ? "expanded" : "collapsed"}`}
+                  >
+                    <div
+                      className="cat-section-header"
+                      onClick={() => setCat2Open(!cat2Open)}
+                    >
+                      <span className="cat-icon">🟠</span>
+                      <span className="cat-title">已识别业务损耗</span>
+                      <span className="cat-meta">
+                        {cat.fx_loss_pairs.length} 笔汇损 · 合计{" "}
+                        {fmtFull(fxTotalLoss)}
+                      </span>
+                      <span className="cat-chevron">
+                        {cat2Open ? "▾" : "▸"}
+                      </span>
+                    </div>
+                    {cat2Open &&
+                      (cat.fx_loss_pairs.length > 0 ? (
+                        <table className="s-table cat-table">
+                          <thead>
+                            <tr>
+                              <th className="th-arrow"></th>
+                              <th>收入方</th>
+                              <th className="th-num">收入金额</th>
+                              <th>支出方</th>
+                              <th className="th-num">支出金额</th>
+                              <th className="th-num">汇损</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cat.fx_loss_pairs.map((pair, idx) => {
+                              const isExpanded = expandedPair === idx;
+                              return (
+                                <Fragment key={idx}>
+                                  <tr
+                                    className={`s-row-clickable s-row-fx ${isExpanded ? "s-row-active" : ""}`}
+                                    onClick={() =>
+                                      setExpandedPair(isExpanded ? null : idx)
+                                    }
+                                  >
+                                    <td className="td-arrow">
+                                      {isExpanded ? "▾" : "▸"}
+                                    </td>
+                                    <td>{pair.to_sheet}</td>
+                                    <td className="td-num">
+                                      {pair.to_currency !== "CNY" ? (
+                                        <>
+                                          {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
+                                          <span className="rate-calc">× {pair.to_rate}</span>
+                                          {" = "}{fmtFull(pair.to_rmb)}
+                                        </>
+                                      ) : (
+                                        fmtFull(pair.to_rmb)
+                                      )}
+                                    </td>
+                                    <td>{pair.from_sheet}</td>
+                                    <td className="td-num">
+                                      {pair.from_currency !== "CNY" ? (
+                                        <>
+                                          {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
+                                          <span className="rate-calc">× {pair.from_rate}</span>
+                                          {" = "}{fmtFull(pair.from_rmb)}
+                                        </>
+                                      ) : (
+                                        fmtFull(pair.from_rmb)
+                                      )}
+                                    </td>
+                                    <td className="td-num expense">
+                                      {fmtFull(pair.loss)}
+                                    </td>
+                                  </tr>
+
+                                  {/* Level 3: FX calculation detail */}
+                                  {isExpanded && (
+                                    <tr className="s-row-detail">
+                                      <td colSpan={6}>
+                                        <div className="detail-panel fx-detail">
+                                          <div className="fx-calc-line">
+                                            <span className="fx-label">支出方RMB</span>
+                                            <span>
+                                              {fmtLocal(pair.from_amount, pair.from_currency)}{" "}
+                                              × {pair.from_rate} ={" "}
+                                              <strong>{fmtFull(pair.from_rmb)}</strong>
+                                            </span>
+                                          </div>
+                                          <div className="fx-calc-line">
+                                            <span className="fx-label">收入方RMB</span>
+                                            <span>
+                                              {fmtLocal(pair.to_amount, pair.to_currency)}{" "}
+                                              × {pair.to_rate} ={" "}
+                                              <strong>{fmtFull(pair.to_rmb)}</strong>
+                                            </span>
+                                          </div>
+                                          <div className="fx-calc-line fx-calc-result">
+                                            <span className="fx-label">汇损</span>
+                                            <span>
+                                              {fmtFull(pair.to_rmb)} −{" "}
+                                              {fmtFull(pair.from_rmb)} ={" "}
+                                              <strong className="expense">
+                                                {fmtFull(pair.loss)}
+                                              </strong>
+                                            </span>
+                                          </div>
+                                          <div className="fx-hint">
+                                            📌 此为业务真实损耗（汇率波动），非数据错误
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              );
+                            })}
+
+                            {/* Total row */}
+                            <tr className="s-row-total">
+                              <td></td>
+                              <td>合计</td>
+                              <td className="td-num">
+                                {fmtFull(
+                                  cat.fx_loss_pairs.reduce((s, p) => s + p.to_rmb, 0)
+                                )}
+                              </td>
+                              <td></td>
+                              <td className="td-num">
+                                {fmtFull(
+                                  cat.fx_loss_pairs.reduce((s, p) => s + p.from_rmb, 0)
+                                )}
+                              </td>
+                              <td className="td-num">
+                                {fmtFull(fxTotalLoss)}
                               </td>
                             </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="no-data">无跨币种汇损</div>
+                      ))}
+                  </div>
 
-                    {/* Total row */}
-                    <tr className="s-row-total">
-                      <td></td>
-                      <td>合计</td>
-                      <td className="td-num">
-                        {fmtFull(pairs.reduce((s, p) => s + p.to_rmb, 0))}
-                      </td>
-                      <td></td>
-                      <td className="td-num">
-                        {fmtFull(pairs.reduce((s, p) => s + p.from_rmb, 0))}
-                      </td>
-                      <td></td>
-                      <td className="td-num">
-                        {fmtFull(pairs.reduce((s, p) => s + p.loss, 0))}
-                      </td>
-                    </tr>
-
-                    {/* Unmatched transfers */}
-                    {(fl?.unmatched ?? []).length > 0 && (
-                      <>
-                        <tr>
-                          <td colSpan={7} className="unmatched-header">
-                            未匹配往来（无对应收支方）
-                          </td>
-                        </tr>
-                        {(fl?.unmatched ?? []).map((u, idx) => (
-                          <tr key={`unmatched-${idx}`} className="s-row-unmatched">
-                            <td></td>
-                            <td>{u.sheet}</td>
-                            <td className={`td-num ${u.direction === "income" ? "income" : "expense"}`}>
-                              {u.direction === "income" ? (
-                                u.currency !== "CNY" ? (
-                                  <>
-                                    {fmtLocal(u.amount, u.currency)}{" "}
-                                    <span className="rate-calc">× {u.rate}</span>
-                                    {" = "}{fmtFull(u.rmb)}
-                                  </>
-                                ) : fmtFull(u.rmb)
-                              ) : (
-                                <span className="td-empty">-</span>
-                              )}
-                            </td>
-                            <td></td>
-                            <td className={`td-num ${u.direction === "expense" ? "expense" : "income"}`}>
-                              {u.direction === "expense" ? (
-                                u.currency !== "CNY" ? (
-                                  <>
-                                    {fmtLocal(u.amount, u.currency)}{" "}
-                                    <span className="rate-calc">× {u.rate}</span>
-                                    {" = "}{fmtFull(u.rmb)}
-                                  </>
-                                ) : fmtFull(u.rmb)
-                              ) : (
-                                <span className="td-empty">-</span>
-                              )}
-                            </td>
-                            <td>
-                              <span className="unmatched-tag">未匹配</span>
-                            </td>
-                            <td></td>
-                          </tr>
-                        ))}
-                      </>
-                    )}
-                  </tbody>
-                </table>
+                  {/* ─── Section 3: 真正未匹配 ─── */}
+                  <div
+                    className={`cat-section cat-unmatched ${cat.unmatched_net_rmb === 0 ? "zero" : "warn"} ${cat3Open ? "expanded" : "collapsed"}`}
+                  >
+                    <div
+                      className="cat-section-header"
+                      onClick={() => setCat3Open(!cat3Open)}
+                    >
+                      <span className="cat-icon">🔴</span>
+                      <span className="cat-title">真正未匹配</span>
+                      <span className="cat-meta">
+                        {cat.unmatched.length} 笔 · 净额{" "}
+                        {fmtFull(cat.unmatched_net_rmb)}
+                      </span>
+                      <span className="cat-chevron">
+                        {cat3Open ? "▾" : "▸"}
+                      </span>
+                    </div>
+                    {cat3Open &&
+                      (cat.unmatched.length > 0 ? (
+                        <>
+                          <table className="s-table cat-table">
+                            <thead>
+                              <tr>
+                                <th>方向</th>
+                                <th>账户</th>
+                                <th>摘要</th>
+                                <th className="th-num">原币金额</th>
+                                <th className="th-num">RMB 金额</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cat.unmatched.map((u, idx) => (
+                                <tr key={idx} className="s-row-static">
+                                  <td
+                                    className={u.direction === "income" ? "income" : "expense"}
+                                  >
+                                    <strong>
+                                      {u.direction === "income" ? "收入" : "支出"}
+                                    </strong>
+                                  </td>
+                                  <td>{u.sheet}</td>
+                                  <td className="td-summary">{u.summary || "-"}</td>
+                                  <td className="td-num">
+                                    {u.currency !== "CNY"
+                                      ? fmtLocal(u.amount, u.currency)
+                                      : fmtFull(u.amount)}
+                                  </td>
+                                  <td
+                                    className={`td-num ${u.direction === "income" ? "income" : "expense"}`}
+                                  >
+                                    {u.direction === "income" ? "+" : "-"}
+                                    {fmtFull(u.rmb)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div className="cat-hint">
+                            {cat.unmatched_net_rmb === 0
+                              ? `净额 ¥0.00 — 通常因对方账户不在本表内（如子公司招行户）`
+                              : `⚠ 净额 ${fmtFull(cat.unmatched_net_rmb)} 无法解释，可能存在数据缺失`}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="no-data">无未匹配往来</div>
+                      ))}
+                  </div>
+                </>
               ) : (
-                <div className="no-data">暂无匹配明细数据</div>
+                <div className="no-data">暂无分类数据，请重新上传文件</div>
               )}
             </div>
           )}
