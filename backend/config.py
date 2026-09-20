@@ -68,6 +68,7 @@ STANDARD_COLS = {
 
 PINGPONG_COLS = {
     "date": 2,       # B
+    "shop_name": 4,  # D (店铺名称)
     "summary": 5,    # E (备注)
     "category": 5,   # E (备注, same as summary for pingpong)
     "income": 6,     # F

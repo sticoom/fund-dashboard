@@ -34,6 +34,7 @@ class Transaction:
     balance: float
     is_pingpong: bool
     row_text: str = ""  # Full row text for improved transfer detection
+    shop_name: str = ""  # Pingpong layout D column (店铺名称), for 平台收入 source display
 
 
 @dataclass
@@ -166,6 +167,9 @@ def _detect_columns(ws, header_row: int) -> dict[str, int]:
             elif val in ("类别", "分类"):
                 if "category" not in cols:
                     cols["category"] = cell.column
+            elif val == "店铺名称":
+                if "shop_name" not in cols:
+                    cols["shop_name"] = cell.column
             elif val == "备注":
                 # Always update to the LAST "备注" column (L col > E col for pingpong)
                 cols["remark_last"] = cell.column
@@ -290,12 +294,18 @@ def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: i
 
         summary = safe_str(cells.get(summary_col))
         category = safe_str(cells.get(category_col))
+        shop_name = safe_str(cells.get(cols.get("shop_name", 0)))
 
         # Pingpong layout: prefer L column (remark_last) for summary if it has data
         if remark_last_col and is_pp:
             l_val = safe_str(cells.get(remark_last_col))
             if l_val:
                 summary = l_val
+
+        # 平台收入 rows: show the source shop name (D column) as summary,
+        # so the dashboard reveals which shop each platform income came from
+        if category == "平台收入" and shop_name:
+            summary = shop_name
 
         # Build full row text for comprehensive transfer detection
         row_text_parts = []
@@ -318,6 +328,7 @@ def parse_sheet(ws, sheet_name: str, data_row_start: int = None, data_row_end: i
             balance=balance_val,
             is_pingpong=is_pp,
             row_text=row_text,
+            shop_name=shop_name,
         )
         transactions.append(txn)
         last_balance = balance_val
