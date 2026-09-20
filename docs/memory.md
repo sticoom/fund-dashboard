@@ -196,3 +196,10 @@
 - 不删除已有记录
 - 编号连续递增
 - 如果新发现修正了旧 pit，在旧 pit 末尾加「⚠️ 已被 #N 修正」标注，但保留原文
+
+### 15. aliyun CLI 配置丢失（config.json 不存在），部署改走 SSH 免密
+- **症状**：`aliyun ecs RunCommand` 报 `ERROR: region can't be empty / load configure failed: CreateFile C:\Users\13676/.aliyun/config.json: The system cannot find the file specified.`
+- **原因**：本机 `~/.aliyun/config.json` 已不存在（2026-06-16 时还在），aliyun CLI 整体不可用；重建配置需要 AccessKey 交互输入
+- **解决**：ECS 已配好 SSH 免密（ssh-copy-id，#12 的安全建议已落实），直接 `ssh root@120.25.100.51 "cd /opt/fund-dashboard && git pull origin main && cd frontend && npm run build && cd .. && systemctl restart fund-dashboard && echo DEPLOY_OK"` 一条命令完成部署，流程与 #10 SOP 相同
+- **注意**：BatchMode 探测免密可用：`ssh -o BatchMode=yes root@120.25.100.51 "echo ok"`；若未来免密失效，回退密码登录或让用户跑 `! aliyun configure` 重建 CLI 配置
+- **验证日期**：2026-09-20（本次平台收入店铺名称功能用此方式部署成功）
